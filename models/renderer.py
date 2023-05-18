@@ -67,7 +67,7 @@ def sample_pdf(bins, weights, n_samples, det=False):
     return samples
 
 
-class CliffordNeuSRendered(DeformNeuSRenderer):
+class CliffordNeuSRenderer(DeformNeuSRenderer):
     def __init__(self,
                  report_freq,
                  deform_field,
