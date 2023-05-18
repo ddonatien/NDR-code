@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from models.embedder import get_embedder
+from cliffordlayers.cliffordkernels import get_3d_clifford_kernel
 
 
 
@@ -104,7 +105,7 @@ class CouplingLayer(nn.Module):
 class MotorLayer(nn.Module):
     def __init__(self, code_sz, motor_sz=8):
         super().__init__()
-        self.g = (3, 0, 1)
+        self.g = torch.tensor((3, 0, 1))
         self.code_sz = code_sz
         self.code_proj = nn.Sequential(
             nn.Linear(code_sz, 2 * code_sz),
@@ -114,7 +115,8 @@ class MotorLayer(nn.Module):
 
     def forward(self, x, c):
         c = self.code_proj(c)
-        _,  k = get_clifford_3d_kernel(c, self.g)
+        print(c.shape)
+        _,  k = get_3d_clifford_kernel(c, self.g)
         output = F.linear(x, weight, self.bias.view(-1))
         return output
 
@@ -255,15 +257,16 @@ class DeformField(nn.Module):
                  d_hidden=[512, 512],
                  ):
         super().__init__()
-        self.mlp = MLP(3+d_fcode, f_feature, d_hidden)
+        self.mlp = MLP(3+d_fcode, d_feature, d_hidden)
 
     def forward(self, x, fcode):
-        feats = self.mlp(torch.cat((x, fcode), dim=-1))
+        w = fcode.repeat(x.shape[0], 1)
+        feats = self.mlp(torch.cat((x, w), dim=-1))
         return x, feats
 
 
 # Deform
-class CliffordNetwork(nn.Module):
+class DeformNetwork(nn.Module):
     def __init__(self,
                  d_feature,
                  d_in,
@@ -278,12 +281,12 @@ class CliffordNetwork(nn.Module):
         super(DeformNetwork, self).__init__()
 
         self.e2cl = torch.zeros(3, 16, requires_grad=False)
-        self.e2cl[1:14] = torch.eye(3, requires_grad=False)
+        self.e2cl[:, 11:14] = torch.eye(3, requires_grad=False)
         self.vp = torch.zeros(16, requires_grad=False)
         self.vp[14] = 1
         self.n_blocks = n_blocks
         for i_b in range(self.n_blocks):
-            mot = MotorLayer(d_feature, motor_sz)
+            mot = MotorLayer(d_feature)
 
             # if l == self.num_layers_a - 2:
             #     torch.nn.init.constant_(lin.bias, 0.0)
@@ -310,7 +313,9 @@ class CliffordNetwork(nn.Module):
 
     def forward(self, input_pts, input_codes, alpha_ratio):
         batch_size = input_pts.shape[0]
-        x = self.e2cl @ input_pts + self.vp
+        print(input_pts.shape)
+        x = input_pts @ self.e2cl + self.vp
+        print(x.shape)
         for i_b in range(self.n_blocks):
             form = (i_b // 3) % 2
             mode = i_b % 3
@@ -319,7 +324,7 @@ class CliffordNetwork(nn.Module):
             x = mot(x, input_codes)
             x = self.activation(x)
 
-        x = torch.transpose(self.cl2e, 1, 0) @ x
+        x = x @ torch.transpose(self.cl2e, 1, 0)
 
         return (x, input_codes)
 

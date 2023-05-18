@@ -14,7 +14,7 @@ from pyhocon import ConfigFactory
 
 from models.dataset import Dataset
 from models.fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork, DeformNetwork, AppearanceNetwork, TopoNetwork
-from models.renderer import NeuSRenderer, DeformNeuSRenderer
+from models.renderer import NeuSRenderer, DeformNeuSRenderer, CliffordNeuSRenderer
 
 
 
@@ -47,7 +47,7 @@ class Runner:
             self.appearance_codes = torch.randn(self.dataset.n_images, self.appearance_dim, requires_grad=True).to(self.device)
         if self.use_clifford:
             from models.clifford_fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork,\
-                                               DeformNetwork, AppearanceNetwork, TopoNetwork
+                                               DeformNetwork, AppearanceNetwork, TopoNetwork, DeformField
             self.deform_dim = self.conf.get_int('model.deform_network.d_feature')
             self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
@@ -92,7 +92,7 @@ class Runner:
             self.topo_network = TopoNetwork(**self.conf['model.topo_network']).to(self.device)
         elif self.use_clifford:
             self.deform_field = DeformField(**self.conf['model.deform_field']).to(self.device)
-            self.deform_network = CliffordNetwork(**self.conf['model.deform_network']).to(self.device)
+            self.deform_network = DeformNetwork(**self.conf['model.deform_network']).to(self.device)
             self.topo_network = TopoNetwork(**self.conf['model.topo_network']).to(self.device)
         self.sdf_network = SDFNetwork(**self.conf['model.sdf_network']).to(self.device)
         self.deviation_network = SingleVarianceNetwork(**self.conf['model.variance_network']).to(self.device)
@@ -193,7 +193,7 @@ class Runner:
 
         for iter_i in tqdm(range(res_step)):
             # Deform
-            if self.use_deform:
+            if self.use_deform or self.use_clifford:
                 image_idx = image_perm[self.iter_step % len(image_perm)]
                 # Deform
                 deform_code = self.deform_codes[image_idx][None, ...]
@@ -816,7 +816,7 @@ if __name__ == '__main__':
     if args.mode == 'train':
         runner.train()
     elif args.mode[:8] == 'validate':
-        if runner.use_deform:
+        if runner.use_deform or self.use_clifford:
             runner.validate_all_mesh(world_space=False, resolution=512, threshold=args.mcube_threshold)
             runner.validate_all_image(resolution_level=1)
         else:
