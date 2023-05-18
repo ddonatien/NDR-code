@@ -67,6 +67,432 @@ def sample_pdf(bins, weights, n_samples, det=False):
     return samples
 
 
+class CliffordNeuSRendered(DeformNeuSRenderer):
+    def __init__(self,
+                 report_freq,
+                 deform_field,
+                 deform_network,
+                 ambient_network,
+                 sdf_network,
+                 deviation_network,
+                 color_network,
+                 begin_n_samples,
+                 end_n_samples,
+                 important_begin_iter,
+                 n_importance,
+                 up_sample_steps,
+                 perturb):
+        super().__init__(report_freq,
+                         deform_network,
+                         ambient_network,
+                         sdf_network,
+                         deviation_network,
+                         color_network,
+                         begin_n_samples,
+                         end_n_samples,
+                         important_begin_iter,
+                         n_importance,
+                         up_sample_steps,
+                         perturb)
+        self.deform_field = deform_field
+
+
+    def cat_z_vals(self, deform_code, rays_o, rays_d, z_vals, new_z_vals, sdf, last=False,
+                   alpha_ratio=0.0):
+        batch_size, n_samples = z_vals.shape
+        _, n_importance = new_z_vals.shape
+        z_vals = torch.cat([z_vals, new_z_vals], dim=-1)
+        z_vals, index = torch.sort(z_vals, dim=-1)
+
+        if not last:
+            pts = rays_o[:, None, :] + rays_d[:, None, :] * new_z_vals[..., :, None]
+            pts = pts.reshape(-1, 3)
+            # Deform
+            pts_aug = self.deform_field(deform_code, pts)
+            pts_canonical = self.deform_network(pts_aug, alpha_ratio)
+            ambient_coord = self.ambient_network(pts_aug, alpha_ratio)
+            new_sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, n_importance)
+            sdf = torch.cat([sdf, new_sdf], dim=-1)
+            xx = torch.arange(batch_size)[:, None].expand(batch_size, n_samples + n_importance).reshape(-1)
+            index = index.reshape(-1)
+            sdf = sdf[(xx, index)].reshape(batch_size, n_samples + n_importance)
+
+        return z_vals, sdf
+
+
+    def render_core(self,
+                    deform_code,
+                    appearance_code,
+                    rays_o,
+                    rays_d,
+                    z_vals,
+                    sample_dist,
+                    deform_field,
+                    deform_network,
+                    ambient_network,
+                    sdf_network,
+                    deviation_network,
+                    color_network,
+                    cos_anneal_ratio=0.0,
+                    alpha_ratio=0.):
+        batch_size, n_samples = z_vals.shape
+
+        # Section length
+        dists = z_vals[..., 1:] - z_vals[..., :-1]
+        dists = torch.cat([dists, torch.Tensor([sample_dist]).expand(dists[..., :1].shape)], -1)
+        mid_z_vals = z_vals + dists * 0.5
+
+        # Section midpoints
+        pts = rays_o[:, None, :] + rays_d[:, None, :] * mid_z_vals[..., :, None]  # n_rays, n_samples, 3
+        dirs_o = rays_d[:, None, :].expand(pts.shape) # view in observation space
+
+        pts = pts.reshape(-1, 3)
+        dirs_o = dirs_o.reshape(-1, 3)
+
+        # Deform
+        # observation space -> canonical space
+        pts_aug = deform_field(deform_code, pts)
+        pts_canonical = deform_network(pts_aug, alpha_ratio)
+        ambient_coord = ambient_network(pts_aug, alpha_ratio)
+        sdf_nn_output = sdf_network(pts_canonical, ambient_coord, alpha_ratio)
+        sdf = sdf_nn_output[:, :1]
+        feature_vector = sdf_nn_output[:, 1:]
+
+        # Deform, gradients in observation space
+        def gradient(deform_field=None,deform_network=None, ambient_network=None, sdf_network=None,
+                     deform_code=None, x=None, alpha_ratio=None):
+            x.requires_grad_(True)
+            pts_aug = deform_field(deform_code, x)
+            x_c = deform_network(pts_aug, alpha_ratio)
+            amb_coord = ambient_network(pts_aug, alpha_ratio)
+            y = sdf_network.sdf(x_c, amb_coord, alpha_ratio)
+
+            # gradient on observation
+            d_output = torch.ones_like(y, requires_grad=False, device=y.device)
+            gradient_o =  torch.autograd.grad(
+                outputs=y,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0]
+
+            # Jacobian on pts
+            y_0 = x_c[:, 0]
+            y_1 = x_c[:, 1]
+            y_2 = x_c[:, 2]
+            d_output = torch.ones_like(y_0, requires_grad=False, device=y_0.device)
+            grad_0 = torch.autograd.grad(
+                outputs=y_0,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0].unsqueeze(1)
+            grad_1 = torch.autograd.grad(
+                outputs=y_1,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0].unsqueeze(1)
+            grad_2 = torch.autograd.grad(
+                outputs=y_2,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0].unsqueeze(1)
+            gradient_pts =  torch.cat([grad_0, grad_1, grad_2], dim=1) # (batch_size, dim_out, dim_in)
+
+            return gradient_o, gradient_pts
+
+        # Deform
+        # observation space -> canonical space
+        gradients_o, pts_jacobian = gradient(deform_field, deform_network, ambient_network, sdf_network,
+                                             deform_code, pts, alpha_ratio)
+        dirs_c = torch.bmm(pts_jacobian, dirs_o.unsqueeze(-1)).squeeze(-1) # view in observation space
+        dirs_c = dirs_c / torch.linalg.norm(dirs_c, ord=2, dim=-1, keepdim=True)
+
+        sampled_color = color_network(appearance_code, pts_canonical, gradients_o,
+            dirs_c, feature_vector, alpha_ratio).reshape(batch_size, n_samples, 3)
+
+        inv_s = deviation_network(torch.zeros([1, 3]))[:, :1].clip(1e-6, 1e6)
+        inv_s = inv_s.expand(batch_size * n_samples, 1)
+
+        true_cos = (dirs_o * gradients_o).sum(-1, keepdim=True) # observation
+
+        # "cos_anneal_ratio" grows from 0 to 1 in the beginning training iterations. The anneal strategy below makes
+        # the cos value "not dead" at the beginning training iterations, for better convergence.
+        iter_cos = -(F.relu(-true_cos * 0.5 + 0.5) * (1.0 - cos_anneal_ratio) +
+                     F.relu(-true_cos) * cos_anneal_ratio)  # always non-positive
+
+        # Estimate signed distances at section points
+        estimated_next_sdf = sdf + iter_cos * dists.reshape(-1, 1) * 0.5
+        estimated_prev_sdf = sdf - iter_cos * dists.reshape(-1, 1) * 0.5
+
+        prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
+        next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
+
+        p = prev_cdf - next_cdf
+        c = prev_cdf
+
+        alpha = ((p + 1e-5) / (c + 1e-5)).reshape(batch_size, n_samples).clip(0.0, 1.0)
+
+        pts_norm = torch.linalg.norm(pts, ord=2, dim=-1, keepdim=True).reshape(batch_size, n_samples)
+        inside_sphere = (pts_norm < 1.0).to(self.dtype).detach()
+        relax_inside_sphere = (pts_norm < 1.2).to(self.dtype).detach()
+
+        weights = alpha * torch.cumprod(torch.cat([torch.ones([batch_size, 1]), 1. - alpha + 1e-7], -1), -1)[:, :-1]
+        weights_sum = weights.sum(dim=-1, keepdim=True)
+
+        # depth map
+        depth_map = torch.sum(weights * mid_z_vals, -1, keepdim=True)
+
+        color = (sampled_color * weights[:, :, None]).sum(dim=1)
+
+        # Eikonal loss, observation + canonical
+        gradient_o_error = (torch.linalg.norm(gradients_o.reshape(batch_size, n_samples, 3), ord=2,
+                                            dim=-1) - 1.0) ** 2
+        relax_inside_sphere_sum = relax_inside_sphere.sum() + 1e-5
+        gradient_o_error = (relax_inside_sphere * gradient_o_error).sum() / relax_inside_sphere_sum
+
+        return {
+            'pts': pts.reshape(batch_size, n_samples, 3),
+            'pts_canonical': pts_canonical.reshape(batch_size, n_samples, 3),
+            'relax_inside_sphere': relax_inside_sphere,
+            'color': color,
+            'sdf': sdf,
+            'dists': dists,
+            'gradients_o': gradients_o.reshape(batch_size, n_samples, 3),
+            's_val': 1.0 / inv_s,
+            'mid_z_vals': mid_z_vals,
+            'weights': weights,
+            'weights_sum': weights_sum,
+            'cdf': c.reshape(batch_size, n_samples),
+            'gradient_o_error': gradient_o_error,
+            'inside_sphere': inside_sphere,
+            'depth_map': depth_map
+        }
+
+
+    def render(self, deform_code, appearance_code, rays_o, rays_d, near, far, perturb_overwrite=-1,
+            cos_anneal_ratio=0.0, alpha_ratio=0., iter_step=0):
+        self.update_samples_num(iter_step, alpha_ratio)
+        batch_size = len(rays_o)
+        sample_dist = 2.0 / self.n_samples # Assuming the region of interest is a unit sphere
+        z_vals = torch.linspace(0.0, 1.0, self.n_samples)
+        z_vals = near + (far - near) * z_vals[None, :]
+
+        n_samples = self.n_samples
+        perturb = self.perturb
+
+        if perturb_overwrite >= 0:
+            perturb = perturb_overwrite
+        if perturb > 0:
+            t_rand = (torch.rand([batch_size, 1]) - 0.5)
+            z_vals = z_vals + t_rand * 2.0 / self.n_samples
+
+        # Up sample
+        if iter_step >= self.important_begin_iter and self.n_importance > 0:
+            with torch.no_grad():
+                pts = rays_o[:, None, :] + rays_d[:, None, :] * z_vals[..., :, None]
+                pts = pts.reshape(-1, 3)
+                # Deform
+                pts, pts_c = self.deform_field(deform_code, pts)
+                pts_canonical = self.deform_network(pts_aug, pts_c, alpha_ratio)
+                ambient_coord = self.ambient_network(pts_aug, pts_c, alpha_ratio)
+                sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, self.n_samples)
+
+                for i in range(self.up_sample_steps):
+                    new_z_vals = self.up_sample(rays_o,
+                                                rays_d,
+                                                z_vals,
+                                                sdf,
+                                                self.n_importance // self.up_sample_steps,
+                                                64 * 2**i)
+                    z_vals, sdf = self.cat_z_vals(deform_code,
+                                                  rays_o,
+                                                  rays_d,
+                                                  z_vals,
+                                                  new_z_vals,
+                                                  sdf,
+                                                  last=(i + 1 == self.up_sample_steps),
+                                                  alpha_ratio=alpha_ratio)
+
+            n_samples = self.n_samples + self.n_importance
+
+        # Render core
+        ret_fine = self.render_core(deform_code,
+                                    appearance_code,
+                                    rays_o,
+                                    rays_d,
+                                    z_vals,
+                                    sample_dist,
+                                    self.deform_field,
+                                    self.deform_network,
+                                    self.ambient_network,
+                                    self.sdf_network,
+                                    self.deviation_network,
+                                    self.color_network,
+                                    cos_anneal_ratio=cos_anneal_ratio,
+                                    alpha_ratio=alpha_ratio)
+
+        weights = ret_fine['weights']
+        s_val = ret_fine['s_val'].reshape(batch_size, n_samples).mean(dim=-1, keepdim=True)
+
+        return {
+            'pts': ret_fine['pts'],
+            'pts_canonical': ret_fine['pts_canonical'],
+            'relax_inside_sphere': ret_fine['relax_inside_sphere'],
+            'color_fine': ret_fine['color'],
+            's_val': s_val,
+            'cdf_fine': ret_fine['cdf'],
+            'weight_sum': ret_fine['weights_sum'],
+            'weight_max': torch.max(weights, dim=-1, keepdim=True)[0],
+            'gradients_o': ret_fine['gradients_o'],
+            'weights': weights,
+            'gradient_o_error': ret_fine['gradient_o_error'],
+            'inside_sphere': ret_fine['inside_sphere'],
+            'depth_map': ret_fine['depth_map']
+        }
+
+
+    # Depth
+    def renderondepth(self,
+                    deform_code,
+                    appearance_code,
+                    rays_o,
+                    rays_d,
+                    rays_s,
+                    alpha_ratio=0.):
+        pts = rays_o + rays_s # n_rays, 3
+
+        pts, pts_c = self.deform_field(deform_code, pts)
+        pts_canonical = self.deform_network(pts, pts_c, alpha_ratio)
+        ambient_coord = self.ambient_network(pts, pt_c, alpha_ratio)
+        feature_vector = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, 1:]
+
+        # Deform, gradients in observation space
+        def gradient(deform_field=None, deform_network=None, ambient_network=None, sdf_network=None,
+                     deform_code=None, x=None, alpha_ratio=None):
+            x.requires_grad_(True)
+            pts, pts_c = deform_field(deform_code, x)
+            x_c = deform_network(pts, pts_c, alpha_ratio)
+            amb_coord = ambient_network(pts, pts_c, alpha_ratio)
+            y = sdf_network.sdf(x_c, amb_coord, alpha_ratio)
+
+            # gradient on observation
+            d_output = torch.ones_like(y, requires_grad=False, device=y.device)
+            gradient_o =  torch.autograd.grad(
+                outputs=y,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0]
+
+            # Jacobian on pts
+            y_0 = x_c[:, 0]
+            y_1 = x_c[:, 1]
+            y_2 = x_c[:, 2]
+            d_output = torch.ones_like(y_0, requires_grad=False, device=y_0.device)
+            grad_0 = torch.autograd.grad(
+                outputs=y_0,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0].unsqueeze(1)
+            grad_1 = torch.autograd.grad(
+                outputs=y_1,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0].unsqueeze(1)
+            grad_2 = torch.autograd.grad(
+                outputs=y_2,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0].unsqueeze(1)
+            gradient_pts =  torch.cat([grad_0, grad_1, grad_2], dim=1) # (batch_size, dim_out, dim_in)
+
+            return gradient_o, gradient_pts
+
+        gradients_o, pts_jacobian = gradient(self.deform_field, self.deform_network, self.ambient_network, self.sdf_network,
+                                             deform_code, pts, alpha_ratio)
+        dirs_c = torch.bmm(pts_jacobian, rays_d.unsqueeze(-1)).squeeze(-1) # view in observation space
+        dirs_c = dirs_c / torch.linalg.norm(dirs_c, ord=2, dim=-1, keepdim=True)
+        color = self.color_network(appearance_code, pts_canonical, gradients_o, \
+            dirs_c, feature_vector, alpha_ratio)
+
+        return color, gradients_o
+
+
+    # Depth
+    def errorondepth(self, deform_code, rays_o, rays_d, rays_s, mask, alpha_ratio=0., iter_step=0):
+        pts = rays_o + rays_s
+        pts, pts_c = self.deform_field(deform_code, pts)
+        pts_canonical = self.deform_network(pts, pts_c, alpha_ratio)
+        ambient_coord = self.ambient_network(pts, pts_c, alpha_ratio)
+        if iter_step % self.report_freq == 0:
+            pts_back = self.deform_network.inverse(pts, pts_c, alpha_ratio)
+        sdf = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, :1]
+        # Deform, gradients in observation space
+        def gradient_obs(deform_field=None, deform_network=None, ambient_network=None, sdf_network=None,
+                         deform_code=None, x=None, alpha_ratio=None):
+            x.requires_grad_(True)
+            pts, pts_c = deform_field(deform_code, x)
+            x_c = deform_network(pts, pts_c, alpha_ratio)
+            amb_coord = ambient_network(pts, pts_c, alpha_ratio)
+            y = sdf_network.sdf(x_c, amb_coord, alpha_ratio)
+
+            # gradient on observation
+            d_output = torch.ones_like(y, requires_grad=False, device=y.device)
+            gradient_o =  torch.autograd.grad(
+                outputs=y,
+                inputs=x,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True)[0]
+
+            return gradient_o
+
+        gradient_o = gradient_obs(self.deform_field, self.deform_network, self.ambient_network, self.sdf_network,
+                                    deform_code, pts, alpha_ratio)
+        true_cos = (rays_d * gradient_o).sum(-1, keepdim=True)
+        relu_cos = F.relu(true_cos)
+        pts = pts.detach()
+        pts_norm = torch.linalg.norm(pts, ord=2, dim=-1, keepdim=True)
+        # Denoise. not use: out of mask or sphere
+        inside_masksphere = (pts_norm < 1.0).to(self.dtype) * mask # inside_sphere * mask
+        sdf = inside_masksphere * sdf
+        inside_masksphere_sum = inside_masksphere.sum() + 1e-5
+        sdf_error = F.l1_loss(sdf, torch.zeros_like(sdf), reduction='sum') / inside_masksphere_sum
+        angle_error = F.l1_loss(relu_cos, torch.zeros_like(relu_cos), reduction='sum') / inside_masksphere_sum
+
+        if iter_step % self.report_freq == 0:
+            print('Invertibility evaluation: ', torch.abs((pts_back-pts)*inside_masksphere).max().data.item())
+
+        return sdf_error, angle_error, inside_masksphere
+
+    def extract_observation_geometry(self, deform_code, bound_min, bound_max, resolution, threshold=0.0, alpha_ratio=0.0):
+        def query_func(pts):
+            pts_aug = self.deform_field(deform_code, pts)
+            return -self.sdf_network.sdf(self.deform_network(pts, pts_c, alpha_ratio),
+                                        self.ambient_network(pts, pts_c, alpha_ratio), alpha_ratio)
+
+        return extract_geometry(bound_min,
+                                bound_max,
+                                resolution=resolution,
+                                threshold=threshold,
+                                query_func=query_func)
+
+
 # Deform
 class DeformNeuSRenderer:
     def __init__(self,

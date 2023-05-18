@@ -1,6 +1,7 @@
 import os
 import logging
 import argparse
+import wandb
 import numpy as np
 import cv2 as cv
 import trimesh
@@ -38,7 +39,15 @@ class Runner:
 
         # Deform
         self.use_deform = self.conf.get_bool('train.use_deform')
+        self.use_clifford = self.conf.get_bool('train.use_clifford')
         if self.use_deform:
+            self.deform_dim = self.conf.get_int('model.deform_network.d_feature')
+            self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
+            self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
+            self.appearance_codes = torch.randn(self.dataset.n_images, self.appearance_dim, requires_grad=True).to(self.device)
+        if self.use_clifford:
+            from models.clifford_fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork,\
+                                               DeformNetwork, AppearanceNetwork, TopoNetwork
             self.deform_dim = self.conf.get_int('model.deform_network.d_feature')
             self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
@@ -81,6 +90,10 @@ class Runner:
         if self.use_deform:
             self.deform_network = DeformNetwork(**self.conf['model.deform_network']).to(self.device)
             self.topo_network = TopoNetwork(**self.conf['model.topo_network']).to(self.device)
+        elif self.use_clifford:
+            self.deform_field = DeformField(**self.conf['model.deform_field']).to(self.device)
+            self.deform_network = CliffordNetwork(**self.conf['model.deform_network']).to(self.device)
+            self.topo_network = TopoNetwork(**self.conf['model.topo_network']).to(self.device)
         self.sdf_network = SDFNetwork(**self.conf['model.sdf_network']).to(self.device)
         self.deviation_network = SingleVarianceNetwork(**self.conf['model.variance_network']).to(self.device)
         # Deform
@@ -98,6 +111,15 @@ class Runner:
                                      self.deviation_network,
                                      self.color_network,
                                      **self.conf['model.neus_renderer'])
+        elif self.use_clifford:
+            self.renderer = CliffordNeuSRenderer(self.report_freq,
+                                                 self.deform_field,
+                                                 self.deform_network,
+                                                 self.topo_network,
+                                                 self.sdf_network,
+                                                 self.deviation_network,
+                                                 self.color_network,
+                                                 **self.conf['model.neus_renderer'])
         else:
             self.renderer = NeuSRenderer(self.sdf_network,
                                         self.deviation_network,
@@ -114,6 +136,20 @@ class Runner:
         params_to_train += [{'name':'sdf_network', 'params':self.sdf_network.parameters(), 'lr':self.learning_rate}]
         params_to_train += [{'name':'deviation_network', 'params':self.deviation_network.parameters(), 'lr':self.learning_rate}]
         params_to_train += [{'name':'color_network', 'params':self.color_network.parameters(), 'lr':self.learning_rate}]
+
+
+        wandb.init(project="ndrcl",
+                   entity='april-lab',
+                   group='NDRCL_train')
+
+        wandb.watch((
+            self.deform_field,
+            self.deform_network,
+            self.topo_network,
+            self.sdf_network,
+            self.deviation_network,
+            self.color_network,
+            ), log='all')
 
         # Camera
         if self.dataset.camera_trainable:
@@ -149,7 +185,8 @@ class Runner:
 
 
     def train(self):
-        self.writer = SummaryWriter(log_dir=os.path.join(self.base_exp_dir, 'logs'))
+        # self.writer = SummaryWriter(log_dir=os.path.join(self.base_exp_dir, 'logs'))
+        wandb_dict = {}
         self.update_learning_rate()
         res_step = self.end_iter - self.iter_step
         image_perm = self.get_image_perm()
@@ -187,8 +224,8 @@ class Runner:
                 mask_sum = mask.sum() + 1e-5
                 
                 render_out = self.renderer.render(deform_code, appearance_code, rays_o, rays_d, near, far,
-                                                cos_anneal_ratio=self.get_cos_anneal_ratio(),
-                                                alpha_ratio=alpha_ratio, iter_step=self.iter_step)
+                                                  cos_anneal_ratio=self.get_cos_anneal_ratio(),
+                                                  alpha_ratio=alpha_ratio, iter_step=self.iter_step)
                 # Depth
                 if self.use_depth:
                     sdf_loss, angle_loss, valid_depth_region =\
@@ -249,26 +286,32 @@ class Runner:
                 self.optimizer.step()
                 self.iter_step += 1
 
-                self.writer.add_scalar('Loss/loss', loss, self.iter_step)
-                self.writer.add_scalar('Loss/color_loss', color_fine_loss, self.iter_step)
+                # TODO check if ok
+                cdf_fine = cdf_fine.mean(0, keepdim=True)
+
+                wandb_dict.update({'iter_step': self.iter_step})
+                wandb_dict.update({'[TRAIN] loss': loss})
+                wandb_dict.update({'[TRAIN] color_loss': color_fine_loss})
                 del color_fine_loss
                 # Depth
                 if self.use_depth:
-                    self.writer.add_scalar('Loss/sdf_loss', sdf_loss, self.iter_step)
-                    self.writer.add_scalar('Loss/depth_loss', depth_loss, self.iter_step)
-                    self.writer.add_scalar('Loss/angle_loss', angle_loss, self.iter_step)
+                    wandb_dict.update({'[TRAIN] sdf_loss': sdf_loss})
+                    wandb_dict.update({'[TRAIN] depth_loss': depth_loss})
+                    wandb_dict.update({'[TRAIN] angle_loss': angle_loss})
                     del sdf_loss
                     del depth_loss
                     del angle_loss
-                self.writer.add_scalar('Loss/eikonal_loss', eikonal_loss, self.iter_step)
-                self.writer.add_scalar('Loss/mask_loss', mask_loss, self.iter_step)
+                wandb_dict.update({'[TRAIN] eikonal_loss': eikonal_loss})
+                wandb_dict.update({'[TRAIN] mask_loss': mask_loss})
                 del eikonal_loss
                 del mask_loss
 
-                self.writer.add_scalar('Statistics/s_val', s_val.mean(), self.iter_step)
-                self.writer.add_scalar('Statistics/cdf', (cdf_fine[:, :1] * mask).sum() / mask_sum, self.iter_step)
-                self.writer.add_scalar('Statistics/weight_max', (weight_max * mask).sum() / mask_sum, self.iter_step)
-                self.writer.add_scalar('Statistics/psnr', psnr, self.iter_step)
+                wandb_dict.update({'[TRAIN] s_val': s_val.mean()})
+                wandb_dict.update({'[TRAIN] cdf': (cdf_fine[:, :1] * mask).sum() / mask_sum})
+                wandb_dict.update({'[TRAIN] weight_max': (weight_max * mask).sum() / mask_sum})
+                wandb_dict.update({'[TRAIN] psnr': psnr})
+
+                wandb.log(wandb_dict)
 
                 if self.iter_step % self.report_freq == 0:
                     print('The files have been saved in:', self.base_exp_dir)
