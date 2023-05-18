@@ -102,8 +102,9 @@ class CouplingLayer(nn.Module):
         return y, ldj
 
 class MotorLayer(nn.Module):
-    def __init__(self, code_sz, motor_sz):
+    def __init__(self, code_sz, motor_sz=8):
         super().__init__()
+        self.g = (3, 0, 1)
         self.code_sz = code_sz
         self.code_proj = nn.Sequential(
             nn.Linear(code_sz, 2 * code_sz),
