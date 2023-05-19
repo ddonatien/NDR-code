@@ -860,7 +860,7 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
 
         # Deform
         # observation space -> canonical space
-        pts, pts_x = deform_field(pts, deform_code)
+        pts, pts_c = deform_field(pts, deform_code)
         pts_canonical = deform_network(pts, pts_c, alpha_ratio)
         ambient_coord = ambient_network(pts, pts_c, alpha_ratio)
         sdf_nn_output = sdf_network(pts_canonical, ambient_coord, alpha_ratio)
