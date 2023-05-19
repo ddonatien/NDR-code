@@ -160,7 +160,7 @@ def get_pga_kernel(
             2*w[:, 5]*w[:, 6] - 2*w[:, 0]*w[:, 4],
             2*w[:, 0]*w[:, 5] + 2*w[:, 4]*w[:, 6],
             0
-        ],
+        ]
     print(w.shape)
     print([t.shape for t in a])
 
@@ -357,10 +357,10 @@ class DeformNetwork(nn.Module):
                  weight_norm=True):
         super(DeformNetwork, self).__init__()
 
-        self.e2cl = torch.zeros(3, 16, requires_grad=False)
-        self.e2cl[:, 11:14] = torch.eye(3, requires_grad=False)
-        self.vp = torch.zeros(16, requires_grad=False)
-        self.vp[14] = 1
+        self.e2cl = torch.zeros(3, 4, requires_grad=False)
+        self.e2cl[:, 3:3] = torch.eye(3, requires_grad=False)
+        self.vp = torch.zeros(4, requires_grad=False)
+        self.vp[3] = 1
         self.n_blocks = n_blocks
         for i_b in range(self.n_blocks):
             mot = MotorLayer(d_feature)
