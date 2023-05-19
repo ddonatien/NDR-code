@@ -31,78 +31,19 @@ class MLP(nn.Module):
         return self.mlp(x)
 
 
-class Shift(nn.Module):
-    def __init__(self, shift) -> None:
+class MotorNorm(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.shift = shift
-
 
     def forward(self, x):
-        return x + self.shift
+        x[:, 0] += 1.
+        norm = torch.sqrt(x[:, 0]**2 + x[:, 4]**2 + x[:, 5]**2 + x[:, 6]**2)
+        x[:, 0] /= norm
+        x[:, 4] /= norm
+        x[:, 5] /= norm
+        x[:, 6] /= norm
+        return x
 
-
-class BaseProjectionLayer(nn.Module):
-    @property
-    def proj_dims(self):
-        raise NotImplementedError()
-
-
-    def forward(self, x):
-        raise NotImplementedError()
-
-
-class ProjectionLayer(BaseProjectionLayer):
-    def __init__(self, input_dims, proj_dims):
-        super().__init__()
-        self._proj_dims = proj_dims
-
-        self.proj = nn.Sequential(
-            nn.Linear(input_dims, 2 * proj_dims), nn.ReLU(), nn.Linear(2 * proj_dims, proj_dims)
-        )
-
-
-    @property
-    def proj_dims(self):
-        return self._proj_dims
-
-
-    def forward(self, x):
-        return self.proj(x)
-
-
-class CouplingLayer(nn.Module):
-    def __init__(self, map_s, map_t, projection, mask):
-        super().__init__()
-        self.map_s = map_s
-        self.map_t = map_t
-        self.projection = projection
-        self.register_buffer("mask", mask) # 1,1,1,3 -> 1,3
-
-
-    def forward(self, F, y, alpha_ratio):
-        y1 = y * self.mask
-
-        F_y1 = torch.cat([F, self.projection(y1,alpha_ratio)], dim=-1)
-        s = self.map_s(F_y1)
-        t = self.map_t(F_y1)
-
-        x = y1 + (1 - self.mask) * ((y - t) * torch.exp(-s))
-        ldj = (-s).sum(-1)
-
-        return x, ldj
-
-
-    def inverse(self, F, x, alpha_ratio):
-        x1 = x * self.mask
-
-        F_x1 = torch.cat([F, self.projection(x1,alpha_ratio)], dim=-1)
-        s = self.map_s(F_x1)
-        t = self.map_t(F_x1)
-
-        y = x1 + (1 - self.mask) * (x * torch.exp(s) + t)
-        ldj = s.sum(-1)
-
-        return y, ldj
 
 class MotorLayer(nn.Module):
     def __init__(self, code_sz, bias=False, motor_sz=8):
@@ -112,7 +53,8 @@ class MotorLayer(nn.Module):
         self.code_proj = nn.Sequential(
             nn.Linear(code_sz, 2 * code_sz),
             nn.ReLU(),
-            nn.Linear(2 * code_sz, motor_sz)
+            nn.Linear(2 * code_sz, motor_sz),
+            MotorNorm()
         )
         if bias:
             # TODO: learn bias as well
@@ -120,10 +62,29 @@ class MotorLayer(nn.Module):
         else:
             self.register_parameter("bias", None)
 
-        # self.reset_parameters()
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        # Initialization of the Clifford linear weight and bias tensors.
+        # The number of blades is taken into account when calculated the bounds of Kaiming uniform.
+        for l in self.code_proj:
+            if isinstance(l, nn.Linear):
+                torch.nn.init.normal_(l.weight, 0.0, 0.1)
+                torch.nn.init.normal_(lin.bias, 0.0, 0.01)
+        # nn.init.kaiming_uniform_(
+        #     self.weight.view(self.out_channels, self.in_channels * self.n_blades),
+        #     a=math.sqrt(5),
+        # )
+        # if self.bias is not None:
+        #     fan_in, _ = nn.init._calculate_fan_in_and_fan_out(
+        #         self.weight.view(self.out_channels, self.in_channels * self.n_blades)
+        #     )
+        #     bound = 1 / math.sqrt(fan_in)
+        #     nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, x, c):
         c = self.code_proj(c)
+        print(c.mean(dim=0))
         _,  k = get_pga_kernel(c, self.g)
         output = torch.bmm(k, x.unsqueeze(-1))#  + self.bias.view(-1)
         return output.squeeze(-1)
@@ -200,129 +161,6 @@ def get_pga_kernel(
     )
     k = torch.stack([k0, k1, k2, k3], dim=-1)
     return 8, k
-
-
-def euler2rot(euler_angle):
-    batch_size = euler_angle.shape[0]
-    one = torch.ones(batch_size, 1, 1).to(euler_angle.device)
-    zero = torch.zeros(batch_size, 1, 1).to(euler_angle.device)
-    theta = euler_angle[:, 0].reshape(-1, 1, 1)
-    phi = euler_angle[:, 1].reshape(-1, 1, 1)
-    psi = euler_angle[:, 2].reshape(-1, 1, 1)
-    rot_x = torch.cat((
-        torch.cat((one, zero, zero), 1),
-        torch.cat((zero, theta.cos(), theta.sin()), 1),
-        torch.cat((zero, -theta.sin(), theta.cos()), 1),
-    ), 2)
-    rot_y = torch.cat((
-        torch.cat((phi.cos(), zero, -phi.sin()), 1),
-        torch.cat((zero, one, zero), 1),
-        torch.cat((phi.sin(), zero, phi.cos()), 1),
-    ), 2)
-    rot_z = torch.cat((
-        torch.cat((psi.cos(), -psi.sin(), zero), 1),
-        torch.cat((psi.sin(), psi.cos(), zero), 1),
-        torch.cat((zero, zero, one), 1)
-    ), 2)
-    return torch.bmm(rot_x, torch.bmm(rot_y, rot_z))
-
-
-def euler2rot_inv(euler_angle):
-    batch_size = euler_angle.shape[0]
-    one = torch.ones(batch_size, 1, 1).to(euler_angle.device)
-    zero = torch.zeros(batch_size, 1, 1).to(euler_angle.device)
-    theta = euler_angle[:, 0].reshape(-1, 1, 1)
-    phi = euler_angle[:, 1].reshape(-1, 1, 1)
-    psi = euler_angle[:, 2].reshape(-1, 1, 1)
-    rot_x = torch.cat((
-        torch.cat((one, zero, zero), 1),
-        torch.cat((zero, theta.cos(), theta.sin()), 1),
-        torch.cat((zero, -theta.sin(), theta.cos()), 1),
-    ), 2)
-    rot_y = torch.cat((
-        torch.cat((phi.cos(), zero, -phi.sin()), 1),
-        torch.cat((zero, one, zero), 1),
-        torch.cat((phi.sin(), zero, phi.cos()), 1),
-    ), 2)
-    rot_z = torch.cat((
-        torch.cat((psi.cos(), -psi.sin(), zero), 1),
-        torch.cat((psi.sin(), psi.cos(), zero), 1),
-        torch.cat((zero, zero, one), 1)
-    ), 2)
-    return torch.bmm(rot_z, torch.bmm(rot_y, rot_x))
-
-
-def euler2rot_2d(euler_angle):
-    # (B, 1) -> (B, 2, 2)
-    theta = euler_angle.reshape(-1, 1, 1)
-    rot = torch.cat((
-        torch.cat((theta.cos(), theta.sin()), 1),
-        torch.cat((-theta.sin(), theta.cos()), 1),
-    ), 2)
-
-    return rot
-
-
-def euler2rot_2dinv(euler_angle):
-    # (B, 1) -> (B, 2, 2)
-    theta = euler_angle.reshape(-1, 1, 1)
-    rot = torch.cat((
-        torch.cat((theta.cos(), -theta.sin()), 1),
-        torch.cat((theta.sin(), theta.cos()), 1),
-    ), 2)
-
-    return rot
-
-
-def quaternions_to_rotation_matrices(quaternions):
-    """
-    Arguments:
-    ---------
-        quaternions: Tensor with size ...x4, where ... denotes any shape of
-                     quaternions to be translated to rotation matrices
-    Returns:
-    -------
-        rotation_matrices: Tensor with size ...x3x3, that contains the computed
-                           rotation matrices
-    """
-    # Allocate memory for a Tensor of size ...x3x3 that will hold the rotation
-    # matrix along the x-axis
-    shape = quaternions.shape[:-1] + (3, 3)
-    R = quaternions.new_zeros(shape)
-
-    # A unit quaternion is q = w + xi + yj + zk
-    xx = quaternions[..., 1] ** 2
-    yy = quaternions[..., 2] ** 2
-    zz = quaternions[..., 3] ** 2
-    ww = quaternions[..., 0] ** 2
-    n = (ww + xx + yy + zz).unsqueeze(-1)
-    s = torch.zeros_like(n)
-    s[n != 0] = 2 / n[n != 0]
-
-    xy = s[..., 0] * quaternions[..., 1] * quaternions[..., 2]
-    xz = s[..., 0] * quaternions[..., 1] * quaternions[..., 3]
-    yz = s[..., 0] * quaternions[..., 2] * quaternions[..., 3]
-    xw = s[..., 0] * quaternions[..., 1] * quaternions[..., 0]
-    yw = s[..., 0] * quaternions[..., 2] * quaternions[..., 0]
-    zw = s[..., 0] * quaternions[..., 3] * quaternions[..., 0]
-
-    xx = s[..., 0] * xx
-    yy = s[..., 0] * yy
-    zz = s[..., 0] * zz
-
-    R[..., 0, 0] = 1 - yy - zz
-    R[..., 0, 1] = xy - zw
-    R[..., 0, 2] = xz + yw
-
-    R[..., 1, 0] = xy + zw
-    R[..., 1, 1] = 1 - xx - zz
-    R[..., 1, 2] = yz - xw
-
-    R[..., 2, 0] = xz - yw
-    R[..., 2, 1] = yz + xw
-    R[..., 2, 2] = 1 - xx - yy
-
-    return R
 
 
 class DeformField(nn.Module):
