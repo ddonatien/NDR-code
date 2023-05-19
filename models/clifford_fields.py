@@ -478,6 +478,10 @@ class TopoNetwork(nn.Module):
         if self.embed_fn_fine is not None:
             # Anneal
             input_pts = self.embed_fn_fine(input_pts, alpha_ratio)
+        # option 1: local deformation code
+        # x = torch.cat([input_pts, deformation_code], dim=-1)
+        # option 2: global deformation code
+        deformations_code = deformation_code.mean(dim=0)
         print(input_pts.shape, deformation_code.shape)
         x = torch.cat([input_pts, deformation_code.repeat(input_pts.shape[0],1)], dim=-1)
         for l in range(0, self.num_layers - 1):
