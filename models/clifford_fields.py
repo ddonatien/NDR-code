@@ -358,7 +358,7 @@ class DeformNetwork(nn.Module):
         super(DeformNetwork, self).__init__()
 
         self.e2cl = torch.zeros(3, 4, requires_grad=False)
-        self.e2cl[:, 3:3] = torch.eye(3, requires_grad=False)
+        self.e2cl[:, :3] = torch.eye(3, requires_grad=False)
         self.vp = torch.zeros(4, requires_grad=False)
         self.vp[3] = 1
         self.n_blocks = n_blocks
