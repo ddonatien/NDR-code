@@ -33,22 +33,29 @@ class MLP(nn.Module):
 
 class MotorNorm(nn.Module):
     def __init__(self):
+        select = torch.zeros(8, 8)
+        select[0, 0] = 1
+        select[4, 4] = 1
+        select[5, 5] = 1
+        select[6, 6] = 1
+        offset = torch.zeros(8)
+        offset[0 ] = 1
+        self.register_buffer('select_mat', select)
+        self.register_buffer('offset', offset)
         super().__init__()
 
     def forward(self, x):
-        x[:, 0] += 1.
-        norm = torch.sqrt(x[:, 0]**2 + x[:, 4]**2 + x[:, 5]**2 + x[:, 6]**2)
-        x[:, 0] /= norm
-        x[:, 4] /= norm
-        x[:, 5] /= norm
-        x[:, 6] /= norm
-        return x
+        x = x + self.offset
+        n = torch.linalg.norm(torch.matmul(x, self.select_mat), dim=1)
+        n = torch.matmul((n-1).unsqueeze(-1).repeat(1,8),
+                         self.select_mat) + 1
+        n = 1 / n
+        return torch.matmul(x, n)
 
 
 class MotorLayer(nn.Module):
     def __init__(self, code_sz, bias=False, motor_sz=8):
         super().__init__()
-        self.g = torch.tensor((3, 0, 1))
         self.code_sz = code_sz
         self.code_proj = nn.Sequential(
             nn.Linear(code_sz, 2 * code_sz),
@@ -69,8 +76,8 @@ class MotorLayer(nn.Module):
         # The number of blades is taken into account when calculated the bounds of Kaiming uniform.
         for l in self.code_proj:
             if isinstance(l, nn.Linear):
-                torch.nn.init.normal_(l.weight, 0.0, 0.1)
-                torch.nn.init.normal_(l.bias, 0.0, 0.01)
+                torch.nn.init.normal_(l.weight, 0.0, 0.01)
+                torch.nn.init.normal_(l.bias, 0.0, 0.001)
         # nn.init.kaiming_uniform_(
         #     self.weight.view(self.out_channels, self.in_channels * self.n_blades),
         #     a=math.sqrt(5),
