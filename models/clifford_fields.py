@@ -70,7 +70,7 @@ class MotorLayer(nn.Module):
         for l in self.code_proj:
             if isinstance(l, nn.Linear):
                 torch.nn.init.normal_(l.weight, 0.0, 0.1)
-                torch.nn.init.normal_(lin.bias, 0.0, 0.01)
+                torch.nn.init.normal_(l.bias, 0.0, 0.01)
         # nn.init.kaiming_uniform_(
         #     self.weight.view(self.out_channels, self.in_channels * self.n_blades),
         #     a=math.sqrt(5),
