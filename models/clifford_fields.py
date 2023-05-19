@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from models.embedder import get_embedder
-from cliffordlayers.cliffordkernels import get_3d_clifford_kernel
+from cliffordlayers.nn.functional.utils import _w_assert
 
 
 
@@ -103,7 +103,7 @@ class CouplingLayer(nn.Module):
         return y, ldj
 
 class MotorLayer(nn.Module):
-    def __init__(self, code_sz, motor_sz=8):
+    def __init__(self, code_sz, bias=False, motor_sz=8):
         super().__init__()
         self.g = torch.tensor((3, 0, 1))
         self.code_sz = code_sz
@@ -112,19 +112,86 @@ class MotorLayer(nn.Module):
             nn.ReLU(),
             nn.Linear(2 * code_sz, motor_sz)
         )
+        if bias:
+            # TODO: learn bias as well
+            self.bias = nn.Parameter(torch.empty(self.n_blades, out_channels))
+        else:
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
 
     def forward(self, x, c):
         c = self.code_proj(c)
-        print(c.shape)
-        _,  k = get_3d_clifford_kernel(c, self.g)
-        output = F.linear(x, weight, self.bias.view(-1))
+        _,  k = get_pga_kernel(c, self.g)
+        print(x.shape, k.shape)
+        output = torch.bmm(k, x) + self.bias.view(-1)
         return output
 
     def inverse(self, x, c):
-        c = self.code_proj(c)
-        _,  k = get_clifford_3d_kernel(c, self.g)
-        output = F.linear(x, weight, self.bias.view(-1))
-        return output
+        return x
+        # c = self.code_proj(c)
+        # output = F.linear(x, weight, self.bias.view(-1))
+        # return output
+
+
+def get_pga_kernel(
+    w: Union[tuple, list, torch.Tensor, nn.Parameter, nn.ParameterList], g: torch.Tensor
+) -> Tuple[int, torch.Tensor]:
+    """Clifford kernel for 3d Clifford algebras, g = [-1, -1, -1] corresponds to an octonion kernel.
+
+    Args:
+        w (Union[tuple, list, torch.Tensor, nn.Parameter, nn.ParameterList]): Weight input of shape `(8, d~input~, d~output~, ...)`.
+        g (torch.Tensor): Signature of Clifford algebra.
+
+    Raises:
+        ValueError: Wrong encoding/decoding options provided.
+
+    Returns:
+        (Tuple[int, torch.Tensor]): Number of output blades, weight output of dimension `(d~output~ * 8, d~input~ * 8, ...)`.
+    """
+    assert isinstance(g, torch.Tensor)
+    assert g.numel() == 3
+    w = _w_assert(w)
+    assert w.shape[-1] == 8
+
+    k0 = torch.cat(
+        [
+            w[:, 0]**2 + w[:, 6]**2 - (w[:, 4]**2 + w[:, 5]**2),
+            2*w[:, 5]*w[:, 6] - 2*w[:, 0]*w[:, 4],
+            2*w[:, 0]*w[:, 5] + 2*w[:, 4]*w[:, 6],
+            0
+        ],
+        dim=-1,
+    )
+    k1 = torch.cat(
+        [
+            2*w[:, 0]*w[:, 4] + 2*w[:, 5]*w[:, 6],
+            w[:, 0]**2 + w[:, 5]**2 - (w[:, 4]**2 + w[:, 6]**2),
+            2*w[:, 4]*w[:, 5] - 2*w[:, 0]*w[:, 6],
+            0
+        ],
+        dim=-1,
+    )
+    k2 = torch.cat(
+        [
+            2*w[:, 4]*w[:, 6] - 2*w[:, 0]*w[:, 4],
+            2*w[:, 0]*w[:, 6] + 2*w[:, 4]*w[:, 5],
+            w[:, 0]**2 + w[:, 4]**2 - (w[:, 5]**2 + w[:, 6]**2),
+            0
+        ],
+        dim=-1,
+    )
+    k3 = torch.cat(
+        [
+            2*w[:, 3]*w[:, 5] - 2*w[:, 2]*w[:, 4] - 2*w[:, 0]*w[:, 1],
+            2*w[:, 1]*w[:, 4] - 2*w[:, 3]*w[:, 6] - 2*w[:, 0]*w[:, 2],
+            2*w[:, 2]*w[:, 6] - 2*w[:, 1]*w[:, 5] - 2*w[:, 0]*w[:, 3],
+            1
+        ],
+        dim=-1,
+    )
+    k = torch.cat([k0, k1, k2], dim=-2)
+    return 8, k
 
 
 def euler2rot(euler_angle):
