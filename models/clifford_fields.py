@@ -91,7 +91,6 @@ class MotorLayer(nn.Module):
 
     def forward(self, x, c):
         c = self.code_proj(c)
-        print(c.mean(dim=0))
         _,  k = get_pga_kernel(c)
         output = torch.bmm(k, x.unsqueeze(-1))#  + self.bias.view(-1)
         return output.squeeze(-1)
