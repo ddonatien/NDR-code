@@ -99,6 +99,8 @@ class Runner:
         # Deform
         if self.use_deform:
             self.color_network = AppearanceNetwork(**self.conf['model.appearance_rendering_network']).to(self.device)
+        elif self.use_clifford:
+            self.color_network = AppearanceNetwork(**self.conf['model.appearance_rendering_network']).to(self.device)
         else:
             self.color_network = RenderingNetwork(**self.conf['model.rendering_network']).to(self.device)
 
