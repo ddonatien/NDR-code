@@ -355,9 +355,9 @@ class DeformNetwork(nn.Module):
                  weight_norm=True):
         super(DeformNetwork, self).__init__()
 
-        self.e2cl = torch.zeros(3, 4, requires_grad=False)
-        self.e2cl[:, :3] = torch.eye(3, requires_grad=False)
-        self.vp = torch.zeros(4, requires_grad=False)
+        self.e2cl = torch.zeros(3, 4, requires_grad=False, dtype=torch.float32)
+        self.e2cl[:, :3] = torch.eye(3, requires_grad=False, dtype=torch.float32)
+        self.vp = torch.zeros(4, requires_grad=False, dtype=torch.float32)
         self.vp[3] = 1
         self.n_blocks = n_blocks
         for i_b in range(self.n_blocks):
@@ -390,8 +390,6 @@ class DeformNetwork(nn.Module):
         batch_size = input_pts.shape[0]
         x = input_pts @ self.e2cl + self.vp
         for i_b in range(self.n_blocks):
-            form = (i_b // 3) % 2
-            mode = i_b % 3
 
             mot = getattr(self, "mot"+str(i_b))
             x = mot(x, input_codes)
@@ -399,20 +397,19 @@ class DeformNetwork(nn.Module):
 
         x = x @ torch.transpose(self.e2cl, 1, 0)
 
-        return (x, input_codes)
+        return x
 
 
     def inverse(self, deformation_code, input_pts, alpha_ratio):
+        print("Deform network inverse called")
         batch_size = input_pts.shape[0]
         x = input_pts
         for i_b in range(self.n_blocks):
-            form = (i_b // 3) % 2
-            mode = i_b % 3
 
             mot = getattr(self, "mot"+str(i_b))
             x = mot.inverse(x, input_codes)
 
-        return (x, input_codes)
+        return x
 
 
 # Deform
@@ -481,8 +478,7 @@ class TopoNetwork(nn.Module):
         # option 1: local deformation code
         # x = torch.cat([input_pts, deformation_code], dim=-1)
         # option 2: global deformation code
-        deformations_code = deformation_code.mean(dim=0)
-        print(input_pts.shape, deformation_code.shape)
+        deformation_code = deformation_code.mean(dim=0)
         x = torch.cat([input_pts, deformation_code.repeat(input_pts.shape[0],1)], dim=-1)
         for l in range(0, self.num_layers - 1):
             lin = getattr(self, "lin" + str(l))
@@ -644,6 +640,7 @@ class SDFNetwork(nn.Module):
 
 
     def forward(self, input_pts, topo_coord, alpha_ratio):
+        print(input_pts.shape, input_pts.dtype)
         input_pts = input_pts * self.scale
         if self.embed_fn_fine is not None:
             # Anneal
