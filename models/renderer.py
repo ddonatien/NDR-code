@@ -817,9 +817,9 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
             pts = rays_o[:, None, :] + rays_d[:, None, :] * new_z_vals[..., :, None]
             pts = pts.reshape(-1, 3)
             # Deform
-            pts_aug = self.deform_field(pts, deform_code)
-            pts_canonical = self.deform_network(pts_aug, alpha_ratio)
-            ambient_coord = self.ambient_network(pts_aug, alpha_ratio)
+            pts, pts_c = self.deform_field(pts, deform_code)
+            pts_canonical = self.deform_network(pts, pts_c, alpha_ratio)
+            ambient_coord = self.ambient_network(pts, pts_c, alpha_ratio)
             new_sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, n_importance)
             sdf = torch.cat([sdf, new_sdf], dim=-1)
             xx = torch.arange(batch_size)[:, None].expand(batch_size, n_samples + n_importance).reshape(-1)
@@ -860,9 +860,9 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
 
         # Deform
         # observation space -> canonical space
-        pts_aug = deform_field(pts, deform_code)
-        pts_canonical = deform_network(pts_aug, alpha_ratio)
-        ambient_coord = ambient_network(pts_aug, alpha_ratio)
+        pts, pts_x = deform_field(pts, deform_code)
+        pts_canonical = deform_network(pts, pts_c, alpha_ratio)
+        ambient_coord = ambient_network(pts, pts_c, alpha_ratio)
         sdf_nn_output = sdf_network(pts_canonical, ambient_coord, alpha_ratio)
         sdf = sdf_nn_output[:, :1]
         feature_vector = sdf_nn_output[:, 1:]
@@ -871,9 +871,9 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
         def gradient(deform_field=None,deform_network=None, ambient_network=None, sdf_network=None,
                      deform_code=None, x=None, alpha_ratio=None):
             x.requires_grad_(True)
-            pts_aug = deform_field(x, deform_code)
-            x_c = deform_network(pts_aug, alpha_ratio)
-            amb_coord = ambient_network(pts_aug, alpha_ratio)
+            pts, pts_c = deform_field(x, deform_code)
+            x_c = deform_network(pts, pts_c, alpha_ratio)
+            amb_coord = ambient_network(pts, pts_c, alpha_ratio)
             y = sdf_network.sdf(x_c, amb_coord, alpha_ratio)
 
             # gradient on observation
@@ -1009,8 +1009,8 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
                 pts = pts.reshape(-1, 3)
                 # Deform
                 pts, pts_c = self.deform_field(pts, deform_code)
-                pts_canonical = self.deform_network(pts_aug, pts_c, alpha_ratio)
-                ambient_coord = self.ambient_network(pts_aug, pts_c, alpha_ratio)
+                pts_canonical = self.deform_network(pts, pts_c, alpha_ratio)
+                ambient_coord = self.ambient_network(pts, pts_c, alpha_ratio)
                 sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, self.n_samples)
 
                 for i in range(self.up_sample_steps):
