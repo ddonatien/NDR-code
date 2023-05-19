@@ -554,7 +554,7 @@ class Runner:
 
         for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
             near, far = self.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
-            if self.use_deform:
+            if self.use_deform or self.use_clifford:
                 render_out = self.renderer.render(deform_code,
                                                 appearance_code,
                                                 rays_o_batch,
@@ -648,7 +648,7 @@ class Runner:
             idx = np.random.randint(self.dataset.n_images)
 
         # Deform
-        if self.use_deform:
+        if self.use_deform or self.use_clifford:
             deform_code = self.deform_codes[idx][None, ...]
             appearance_code = self.appearance_codes[idx][None, ...]
         print('Validate: iter: {}, camera: {}'.format(self.iter_step, idx))
@@ -818,7 +818,7 @@ if __name__ == '__main__':
     if args.mode == 'train':
         runner.train()
     elif args.mode[:8] == 'validate':
-        if runner.use_deform or self.use_clifford:
+        if runner.use_deform or runner.use_clifford:
             runner.validate_all_mesh(world_space=False, resolution=512, threshold=args.mcube_threshold)
             runner.validate_all_image(resolution_level=1)
         else:
