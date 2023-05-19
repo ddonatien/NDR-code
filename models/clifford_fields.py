@@ -33,16 +33,16 @@ class MLP(nn.Module):
 
 class MotorNorm(nn.Module):
     def __init__(self):
+        super().__init__()
         select = torch.zeros(8, 8)
         select[0, 0] = 1
         select[4, 4] = 1
         select[5, 5] = 1
         select[6, 6] = 1
         offset = torch.zeros(8)
-        offset[0 ] = 1
+        offset[0] = 1
         self.register_buffer('select_mat', select)
         self.register_buffer('offset', offset)
-        super().__init__()
 
     def forward(self, x):
         x = x + self.offset
@@ -50,7 +50,7 @@ class MotorNorm(nn.Module):
         n = torch.matmul((n-1).unsqueeze(-1).repeat(1,8),
                          self.select_mat) + 1
         n = 1 / n
-        return torch.matmul(x, n)
+        return x * n
 
 
 class MotorLayer(nn.Module):
@@ -92,7 +92,7 @@ class MotorLayer(nn.Module):
     def forward(self, x, c):
         c = self.code_proj(c)
         print(c.mean(dim=0))
-        _,  k = get_pga_kernel(c, self.g)
+        _,  k = get_pga_kernel(c)
         output = torch.bmm(k, x.unsqueeze(-1))#  + self.bias.view(-1)
         return output.squeeze(-1)
 
@@ -105,7 +105,7 @@ class MotorLayer(nn.Module):
 
 
 def get_pga_kernel(
-    w: Union[tuple, list, torch.Tensor, nn.Parameter, nn.ParameterList], g: torch.Tensor
+    w: Union[tuple, list, torch.Tensor, nn.Parameter, nn.ParameterList]
 ) -> Tuple[int, torch.Tensor]:
     """Clifford kernel for 3d Clifford algebras, g = [-1, -1, -1] corresponds to an octonion kernel.
 

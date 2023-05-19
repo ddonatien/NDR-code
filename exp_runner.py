@@ -532,7 +532,7 @@ class Runner:
         if idx < 0:
             idx = np.random.randint(self.dataset.n_images)
         # Deform
-        if self.use_deform:
+        if self.use_deform or self.use_clifford:
             deform_code = self.deform_codes[idx][None, ...]
             appearance_code = self.appearance_codes[idx][None, ...]
         print('Validate: iter: {}, camera: {}'.format(self.iter_step, idx))
