@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 from models.embedder import get_embedder
-from cliffordlayers.nn.functional.utils import _w_assert
+from typing import Tuple, Union
+
+# from cliffordlayers.nn.functional.utils import _w_assert
 
 
 
@@ -118,7 +120,7 @@ class MotorLayer(nn.Module):
         else:
             self.register_parameter("bias", None)
 
-        self.reset_parameters()
+        # self.reset_parameters()
 
     def forward(self, x, c):
         c = self.code_proj(c)
@@ -149,10 +151,18 @@ def get_pga_kernel(
     Returns:
         (Tuple[int, torch.Tensor]): Number of output blades, weight output of dimension `(d~output~ * 8, d~input~ * 8, ...)`.
     """
-    assert isinstance(g, torch.Tensor)
-    assert g.numel() == 3
-    w = _w_assert(w)
+    # assert isinstance(g, torch.Tensor)
+    # assert g.numel() == 3
+    # w = _w_assert(w)
     assert w.shape[-1] == 8
+    a =[
+            w[:, 0]**2 + w[:, 6]**2 - (w[:, 4]**2 + w[:, 5]**2),
+            2*w[:, 5]*w[:, 6] - 2*w[:, 0]*w[:, 4],
+            2*w[:, 0]*w[:, 5] + 2*w[:, 4]*w[:, 6],
+            0
+        ],
+    print(w.shape)
+    print([t.shape for t in a])
 
     k0 = torch.cat(
         [
@@ -190,7 +200,7 @@ def get_pga_kernel(
         ],
         dim=-1,
     )
-    k = torch.cat([k0, k1, k2], dim=-2)
+    k = torch.cat([k0, k1, k2, k3], dim=-2)
     return 8, k
 
 
