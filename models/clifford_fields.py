@@ -640,7 +640,6 @@ class SDFNetwork(nn.Module):
 
 
     def forward(self, input_pts, topo_coord, alpha_ratio):
-        print(input_pts.shape, input_pts.dtype)
         input_pts = input_pts * self.scale
         if self.embed_fn_fine is not None:
             # Anneal
