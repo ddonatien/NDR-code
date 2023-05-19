@@ -479,8 +479,9 @@ class DeformNeuSRenderer:
         pts = rays_o + rays_s
         pts_canonical = self.deform_network(deform_code, pts, alpha_ratio)
         ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
-        if iter_step % self.report_freq == 0:
-            pts_back = self.deform_network.inverse(deform_code, pts_canonical, alpha_ratio)
+        # Inverse
+        # if iter_step % self.report_freq == 0:
+        #     pts_back = self.deform_network.inverse(deform_code, pts_canonical, alpha_ratio)
         sdf = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, :1]
         # Deform, gradients in observation space
         def gradient_obs(deform_network=None, ambient_network=None, sdf_network=None, deform_code=None, x=None, alpha_ratio=None):
@@ -514,8 +515,9 @@ class DeformNeuSRenderer:
         sdf_error = F.l1_loss(sdf, torch.zeros_like(sdf), reduction='sum') / inside_masksphere_sum
         angle_error = F.l1_loss(relu_cos, torch.zeros_like(relu_cos), reduction='sum') / inside_masksphere_sum
 
-        if iter_step % self.report_freq == 0:
-            print('Invertibility evaluation: ', torch.abs((pts_back-pts)*inside_masksphere).max().data.item())
+        # Inverse
+        # if iter_step % self.report_freq == 0:
+        #     print('Invertibility evaluation: ', torch.abs((pts_back-pts)*inside_masksphere).max().data.item())
 
         return sdf_error, angle_error, inside_masksphere
 
@@ -1147,8 +1149,9 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
         pts, pts_c = self.deform_field(pts, deform_code)
         pts_canonical = self.deform_network(pts, pts_c, alpha_ratio)
         ambient_coord = self.ambient_network(pts, pts_c, alpha_ratio)
-        if iter_step % self.report_freq == 0:
-            pts_back = self.deform_network.inverse(pts, pts_c, alpha_ratio)
+        # Inverse
+        # if iter_step % self.report_freq == 0:
+        #     pts_back = self.deform_network.inverse(pts, pts_c, alpha_ratio)
         sdf = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, :1]
         # Deform, gradients in observation space
         def gradient_obs(deform_field=None, deform_network=None, ambient_network=None, sdf_network=None,
@@ -1184,8 +1187,9 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
         sdf_error = F.l1_loss(sdf, torch.zeros_like(sdf), reduction='sum') / inside_masksphere_sum
         angle_error = F.l1_loss(relu_cos, torch.zeros_like(relu_cos), reduction='sum') / inside_masksphere_sum
 
-        if iter_step % self.report_freq == 0:
-            print('Invertibility evaluation: ', torch.abs((pts_back-pts)*inside_masksphere).max().data.item())
+        # Inverse
+        # if iter_step % self.report_freq == 0:
+        #     print('Invertibility evaluation: ', torch.abs((pts_back-pts)*inside_masksphere).max().data.item())
 
         return sdf_error, angle_error, inside_masksphere
 
