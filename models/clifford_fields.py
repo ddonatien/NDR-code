@@ -125,11 +125,11 @@ class MotorLayer(nn.Module):
     def forward(self, x, c):
         c = self.code_proj(c)
         _,  k = get_pga_kernel(c, self.g)
-        print(x.shape, k.shape)
-        output = torch.bmm(k, x) + self.bias.view(-1)
-        return output
+        output = torch.bmm(k, x.unsqueeze(-1))#  + self.bias.view(-1)
+        return output.squeeze(-1)
 
     def inverse(self, x, c):
+        print("Inverse called")
         return x
         # c = self.code_proj(c)
         # output = F.linear(x, weight, self.bias.view(-1))
@@ -159,48 +159,46 @@ def get_pga_kernel(
             w[:, 0]**2 + w[:, 6]**2 - (w[:, 4]**2 + w[:, 5]**2),
             2*w[:, 5]*w[:, 6] - 2*w[:, 0]*w[:, 4],
             2*w[:, 0]*w[:, 5] + 2*w[:, 4]*w[:, 6],
-            0
+            w[:,7]*0
         ]
-    print(w.shape)
-    print([t.shape for t in a])
 
-    k0 = torch.cat(
+    k0 = torch.stack(
         [
             w[:, 0]**2 + w[:, 6]**2 - (w[:, 4]**2 + w[:, 5]**2),
             2*w[:, 5]*w[:, 6] - 2*w[:, 0]*w[:, 4],
             2*w[:, 0]*w[:, 5] + 2*w[:, 4]*w[:, 6],
-            0
+            w[:,7]*0
         ],
         dim=-1,
     )
-    k1 = torch.cat(
+    k1 = torch.stack(
         [
             2*w[:, 0]*w[:, 4] + 2*w[:, 5]*w[:, 6],
             w[:, 0]**2 + w[:, 5]**2 - (w[:, 4]**2 + w[:, 6]**2),
             2*w[:, 4]*w[:, 5] - 2*w[:, 0]*w[:, 6],
-            0
+            w[:,7]*0
         ],
         dim=-1,
     )
-    k2 = torch.cat(
+    k2 = torch.stack(
         [
             2*w[:, 4]*w[:, 6] - 2*w[:, 0]*w[:, 4],
             2*w[:, 0]*w[:, 6] + 2*w[:, 4]*w[:, 5],
             w[:, 0]**2 + w[:, 4]**2 - (w[:, 5]**2 + w[:, 6]**2),
-            0
+            w[:, 7]*0
         ],
         dim=-1,
     )
-    k3 = torch.cat(
+    k3 = torch.stack(
         [
             2*w[:, 3]*w[:, 5] - 2*w[:, 2]*w[:, 4] - 2*w[:, 0]*w[:, 1],
             2*w[:, 1]*w[:, 4] - 2*w[:, 3]*w[:, 6] - 2*w[:, 0]*w[:, 2],
             2*w[:, 2]*w[:, 6] - 2*w[:, 1]*w[:, 5] - 2*w[:, 0]*w[:, 3],
-            1
+            w[:, 0]**2 + w[:, 4]**2 + w[:, 5]**2 + w[:, 6]**2
         ],
         dim=-1,
     )
-    k = torch.cat([k0, k1, k2, k3], dim=-2)
+    k = torch.stack([k0, k1, k2, k3], dim=-1)
     return 8, k
 
 
@@ -390,9 +388,7 @@ class DeformNetwork(nn.Module):
 
     def forward(self, input_pts, input_codes, alpha_ratio):
         batch_size = input_pts.shape[0]
-        print(input_pts.shape)
         x = input_pts @ self.e2cl + self.vp
-        print(x.shape)
         for i_b in range(self.n_blocks):
             form = (i_b // 3) % 2
             mode = i_b % 3
@@ -401,7 +397,7 @@ class DeformNetwork(nn.Module):
             x = mot(x, input_codes)
             x = self.activation(x)
 
-        x = x @ torch.transpose(self.cl2e, 1, 0)
+        x = x @ torch.transpose(self.e2cl, 1, 0)
 
         return (x, input_codes)
 
@@ -482,6 +478,7 @@ class TopoNetwork(nn.Module):
         if self.embed_fn_fine is not None:
             # Anneal
             input_pts = self.embed_fn_fine(input_pts, alpha_ratio)
+        print(input_pts.shape, deformation_code.shape)
         x = torch.cat([input_pts, deformation_code.repeat(input_pts.shape[0],1)], dim=-1)
         for l in range(0, self.num_layers - 1):
             lin = getattr(self, "lin" + str(l))
