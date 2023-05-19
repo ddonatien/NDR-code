@@ -1081,7 +1081,7 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
 
         pts, pts_c = self.deform_field(pts, deform_code)
         pts_canonical = self.deform_network(pts, pts_c, alpha_ratio)
-        ambient_coord = self.ambient_network(pts, pt_c, alpha_ratio)
+        ambient_coord = self.ambient_network(pts, pts_c, alpha_ratio)
         feature_vector = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, 1:]
 
         # Deform, gradients in observation space
