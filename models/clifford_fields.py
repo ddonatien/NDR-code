@@ -59,7 +59,7 @@ class MotorLayer(nn.Module):
         self.code_sz = code_sz
         self.code_proj = nn.Sequential(
             nn.Linear(code_sz, 2 * code_sz),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(2 * code_sz, motor_sz),
             MotorNorm()
         )
