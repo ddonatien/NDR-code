@@ -288,9 +288,6 @@ class Runner:
                 self.optimizer.step()
                 self.iter_step += 1
 
-                # TODO check if ok
-                cdf_fine = cdf_fine.mean(0, keepdim=True)
-
                 wandb_dict.update({'iter_step': self.iter_step})
                 wandb_dict.update({'[TRAIN] loss': loss})
                 wandb_dict.update({'[TRAIN] color_loss': color_fine_loss})
