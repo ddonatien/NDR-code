@@ -76,8 +76,10 @@ class MotorLayer(nn.Module):
         # The number of blades is taken into account when calculated the bounds of Kaiming uniform.
         for l in self.code_proj:
             if isinstance(l, nn.Linear):
-                torch.nn.init.normal_(l.weight, 0.0, 0.01)
-                torch.nn.init.normal_(l.bias, 0.0, 0.001)
+                # torch.nn.init.normal_(l.weight, 0.0, 0.01)
+                # torch.nn.init.normal_(l.bias, 0.0, 0.001)
+                nn.init.constant_(l.bias, 0.0)
+                nn.init.constant_(l.weight, 0.0)
         # nn.init.kaiming_uniform_(
         #     self.weight.view(self.out_channels, self.in_channels * self.n_blades),
         #     a=math.sqrt(5),
@@ -176,7 +178,7 @@ class DeformField(nn.Module):
                  d_hidden=[512, 512],
                  ):
         super().__init__()
-        self.mlp = MLP(3+d_fcode, d_feature, d_hidden)
+        self.mlp = MLP(3+d_fcode, d_feature, d_hidden, zero_init=True)
 
     def forward(self, x, fcode):
         w = fcode.repeat(x.shape[0], 1)
