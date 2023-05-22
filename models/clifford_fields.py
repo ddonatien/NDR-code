@@ -21,8 +21,8 @@ class MLP(nn.Module):
             d_in = d_out
         layers.append(nn.Linear(d_in, c_out)) # nn.Conv1d(d_in, c_out, 1, 1, 0)
         if zero_init:
-            nn.init.constant_(layers[-1].bias, 0.0)
-            nn.init.constant_(layers[-1].weight, 0.0)
+            nn.init.normal_(layers[-1].bias, 0.0, 1e-5)
+            nn.init.normal_(layers[-1].weight, 0.0, 1e-6)
         self.mlp = nn.Sequential(*layers)
         self.c_out = c_out
 
@@ -76,10 +76,10 @@ class MotorLayer(nn.Module):
         # The number of blades is taken into account when calculated the bounds of Kaiming uniform.
         for l in self.code_proj:
             if isinstance(l, nn.Linear):
-                # torch.nn.init.normal_(l.weight, 0.0, 0.01)
-                # torch.nn.init.normal_(l.bias, 0.0, 0.001)
-                nn.init.constant_(l.bias, 0.0)
-                nn.init.constant_(l.weight, 0.0)
+                torch.nn.init.normal_(l.weight, 0.0, 0.001)
+                torch.nn.init.normal_(l.bias, 0.0, 0.0001)
+                # nn.init.constant_(l.bias, 0.0)
+                # nn.init.constant_(l.weight, 0.0)
         # nn.init.kaiming_uniform_(
         #     self.weight.view(self.out_channels, self.in_channels * self.n_blades),
         #     a=math.sqrt(5),

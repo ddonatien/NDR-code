@@ -46,8 +46,9 @@ class Runner:
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
             self.appearance_codes = torch.randn(self.dataset.n_images, self.appearance_dim, requires_grad=True).to(self.device)
         if self.use_clifford:
-            from models.clifford_fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork,\
-                                               DeformNetwork, AppearanceNetwork, TopoNetwork, DeformField
+            print("Prout")
+            # from models.clifford_fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork,\
+            #                                    DeformNetwork, AppearanceNetwork, TopoNetwork, DeformField
             self.deform_dim = self.conf.get_int('model.deform_field.d_fcode')
             self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
@@ -145,7 +146,7 @@ class Runner:
                    group='NDRCL_train')
 
         wandb.watch((
-            self.deform_field,
+            # self.deform_field,
             self.deform_network,
             self.topo_network,
             self.sdf_network,
