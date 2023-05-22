@@ -378,7 +378,6 @@ class DeformNetwork(nn.Module):
             if self.embed_fn_1 is not None:
                 # Anneal
                 x_other = self.embed_fn_1(x_other, alpha_ratio)
-            print(x_other.shape, deform_code_ib.shape)
             x_other = torch.cat([x_other, deform_code_ib], dim=-1)
             x = x_other
             for l in range(0, self.num_layers_a - 1):

@@ -181,6 +181,7 @@ class DeformField(nn.Module):
         self.mlp = MLP(3+d_fcode, d_feature, d_hidden, zero_init=True)
 
     def forward(self, x, fcode):
+        print(x.shape, fcode.shape)
         w = fcode.repeat(x.shape[0], 1)
         feats = self.mlp(torch.cat((x, w), dim=-1))
         return x, feats
