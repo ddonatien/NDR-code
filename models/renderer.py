@@ -355,7 +355,7 @@ class DeformNeuSRenderer:
                 pts = rays_o[:, None, :] + rays_d[:, None, :] * z_vals[..., :, None]
                 pts = pts.reshape(-1, 3)
                 # Deform
-                pts, pts_c = self.deform_field(pts, deform_cod)
+                pts, pts_c = self.deform_field(pts, deform_code)
                 pts_canonical = self.deform_network(pts_c, pts, alpha_ratio)
                 ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
                 sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, self.n_samples)
@@ -424,7 +424,7 @@ class DeformNeuSRenderer:
                     alpha_ratio=0.):
         pts = rays_o + rays_s # n_rays, 3
 
-        pts, pts_c = self.deform_field(pts, deform_cod)
+        pts, pts_c = self.deform_field(pts, deform_code)
         pts_canonical = self.deform_network(pts_c, pts, alpha_ratio)
         ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
         feature_vector = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, 1:]
@@ -813,6 +813,7 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
                  up_sample_steps,
                  perturb):
         super().__init__(report_freq,
+                         deform_field,
                          deform_network,
                          ambient_network,
                          sdf_network,
@@ -824,7 +825,6 @@ class CliffordNeuSRenderer(DeformNeuSRenderer):
                          n_importance,
                          up_sample_steps,
                          perturb)
-        self.deform_field = deform_field
 
 
     def cat_z_vals(self, deform_code, rays_o, rays_d, z_vals, new_z_vals, sdf, last=False,
