@@ -556,7 +556,7 @@ class DeformNeuSRenderer:
                                 bound_max,
                                 resolution=resolution,
                                 threshold=threshold,
-                                query_func=query_func(pts))
+                                query_func=query_func)
 
 
 class NeuSRenderer:
