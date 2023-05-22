@@ -14,6 +14,7 @@ from pyhocon import ConfigFactory
 
 from models.dataset import Dataset
 from models.fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork, DeformNetwork, AppearanceNetwork, TopoNetwork
+from models.clifford_fields import DeformField
 from models.renderer import NeuSRenderer, DeformNeuSRenderer, CliffordNeuSRenderer
 
 
