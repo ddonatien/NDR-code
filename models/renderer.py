@@ -71,6 +71,7 @@ def sample_pdf(bins, weights, n_samples, det=False):
 class DeformNeuSRenderer:
     def __init__(self,
                  report_freq,
+                 deform_field,
                  deform_network,
                  ambient_network,
                  sdf_network,
@@ -84,6 +85,7 @@ class DeformNeuSRenderer:
                  perturb):
         self.dtype = torch.get_default_dtype()
         # Deform
+        self.deform_field = deform_field
         self.deform_network = deform_network
         self.ambient_network = ambient_network
         self.sdf_network = sdf_network
@@ -162,7 +164,8 @@ class DeformNeuSRenderer:
             pts = rays_o[:, None, :] + rays_d[:, None, :] * new_z_vals[..., :, None]
             pts = pts.reshape(-1, 3)
             # Deform
-            pts_canonical = self.deform_network(deform_code, pts, alpha_ratio)
+            pts, pts_c = self.deform_field(deform_code, pts)
+            pts_canonical = self.deform_network(pts_c, pts, alpha_ratio)
             ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
             new_sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, n_importance)
             sdf = torch.cat([sdf, new_sdf], dim=-1)
@@ -180,6 +183,7 @@ class DeformNeuSRenderer:
                     rays_d,
                     z_vals,
                     sample_dist,
+                    deform_field,
                     deform_network,
                     ambient_network,
                     sdf_network,
@@ -203,16 +207,19 @@ class DeformNeuSRenderer:
 
         # Deform
         # observation space -> canonical space
-        pts_canonical = deform_network(deform_code, pts, alpha_ratio)
+        pts, pts_c = deform_field(deform_code, pts)
+        pts_canonical = deform_network(pts_c, pts, alpha_ratio)
         ambient_coord = ambient_network(deform_code, pts, alpha_ratio)
         sdf_nn_output = sdf_network(pts_canonical, ambient_coord, alpha_ratio)
         sdf = sdf_nn_output[:, :1]
         feature_vector = sdf_nn_output[:, 1:]
 
         # Deform, gradients in observation space
-        def gradient(deform_network=None, ambient_network=None, sdf_network=None, deform_code=None, x=None, alpha_ratio=None):
+        def gradient(deform_field=None, deform_network=None, ambient_network=None, sdf_network=None, deform_code=None,
+                     x=None, alpha_ratio=None):
             x.requires_grad_(True)
-            x_c = deform_network(deform_code, x, alpha_ratio)
+            pts, pts_c = deform_field(deform_code, x)
+            x_c = deform_network(pts_c, pts, alpha_ratio)
             amb_coord = ambient_network(deform_code, x, alpha_ratio)
             y = sdf_network.sdf(x_c, amb_coord, alpha_ratio)
             
@@ -258,7 +265,8 @@ class DeformNeuSRenderer:
 
         # Deform
         # observation space -> canonical space
-        gradients_o, pts_jacobian = gradient(deform_network, ambient_network, sdf_network, deform_code, pts, alpha_ratio)
+        gradients_o, pts_jacobian = gradient(deform_field, deform_network, ambient_network, sdf_network,
+                                             deform_code, pts, alpha_ratio)
         dirs_c = torch.bmm(pts_jacobian, dirs_o.unsqueeze(-1)).squeeze(-1) # view in observation space
         dirs_c = dirs_c / torch.linalg.norm(dirs_c, ord=2, dim=-1, keepdim=True)
         
@@ -347,7 +355,8 @@ class DeformNeuSRenderer:
                 pts = rays_o[:, None, :] + rays_d[:, None, :] * z_vals[..., :, None]
                 pts = pts.reshape(-1, 3)
                 # Deform
-                pts_canonical = self.deform_network(deform_code, pts, alpha_ratio)
+                pts, pts_c = self.deform_field(deform_code, pts)
+                pts_canonical = self.deform_network(pts_c, pts, alpha_ratio)
                 ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
                 sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, self.n_samples)
 
@@ -376,6 +385,7 @@ class DeformNeuSRenderer:
                                     rays_d,
                                     z_vals,
                                     sample_dist,
+                                    self.deform_field,
                                     self.deform_network,
                                     self.ambient_network,
                                     self.sdf_network,
@@ -414,14 +424,17 @@ class DeformNeuSRenderer:
                     alpha_ratio=0.):
         pts = rays_o + rays_s # n_rays, 3
 
-        pts_canonical = self.deform_network(deform_code, pts, alpha_ratio)
+        pts, pts_c = self.deform_field(deform_code, pts)
+        pts_canonical = self.deform_network(pts_c, pts, alpha_ratio)
         ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
         feature_vector = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, 1:]
 
         # Deform, gradients in observation space
-        def gradient(deform_network=None, ambient_network=None, sdf_network=None, deform_code=None, x=None, alpha_ratio=None):
+        def gradient(deform_field=None, deform_network=None, ambient_network=None, sdf_network=None,
+                     deform_code=None, x=None, alpha_ratio=None):
             x.requires_grad_(True)
-            x_c = deform_network(deform_code, x, alpha_ratio)
+            pts, pts_c = deform_field(deform_code, x)
+            x_c = deform_network(pts_c, pts, alpha_ratio)
             amb_coord = ambient_network(deform_code, x, alpha_ratio)
             y = sdf_network.sdf(x_c, amb_coord, alpha_ratio)
             
@@ -465,7 +478,8 @@ class DeformNeuSRenderer:
 
             return gradient_o, gradient_pts
 
-        gradients_o, pts_jacobian = gradient(self.deform_network, self.ambient_network, self.sdf_network, deform_code, pts, alpha_ratio)
+        gradients_o, pts_jacobian = gradient(self.deform_field, self.deform_network, self.ambient_network,
+                                             self.sdf_network, deform_code, pts, alpha_ratio)
         dirs_c = torch.bmm(pts_jacobian, rays_d.unsqueeze(-1)).squeeze(-1) # view in observation space
         dirs_c = dirs_c / torch.linalg.norm(dirs_c, ord=2, dim=-1, keepdim=True)
         color = self.color_network(appearance_code, pts_canonical, gradients_o, \
@@ -477,16 +491,19 @@ class DeformNeuSRenderer:
     # Depth
     def errorondepth(self, deform_code, rays_o, rays_d, rays_s, mask, alpha_ratio=0., iter_step=0):
         pts = rays_o + rays_s
-        pts_canonical = self.deform_network(deform_code, pts, alpha_ratio)
+        pts, pts_c = deform_field(deform_code, pts)
+        pts_canonical = self.deform_network(pts_c, pts, alpha_ratio)
         ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
         # Inverse
         # if iter_step % self.report_freq == 0:
         #     pts_back = self.deform_network.inverse(deform_code, pts_canonical, alpha_ratio)
         sdf = self.sdf_network(pts_canonical, ambient_coord, alpha_ratio)[:, :1]
         # Deform, gradients in observation space
-        def gradient_obs(deform_network=None, ambient_network=None, sdf_network=None, deform_code=None, x=None, alpha_ratio=None):
+        def gradient_obs(deform_field=None, deform_network=None, ambient_network=None, sdf_network=None,
+                         deform_code=None, x=None, alpha_ratio=None):
             x.requires_grad_(True)
-            x_c = deform_network(deform_code, x, alpha_ratio)
+            pts, pts_c = deform_field(deform_code, x)
+            x_c = deform_network(pts_c, pts, alpha_ratio)
             amb_coord = ambient_network(deform_code, x, alpha_ratio)
             y = sdf_network.sdf(x_c, amb_coord, alpha_ratio)
             
@@ -502,7 +519,7 @@ class DeformNeuSRenderer:
 
             return gradient_o
 
-        gradient_o = gradient_obs(self.deform_network, self.ambient_network, self.sdf_network,
+        gradient_o = gradient_obs(self.deform_field, self.deform_network, self.ambient_network, self.sdf_network,
                                     deform_code, pts, alpha_ratio)
         true_cos = (rays_d * gradient_o).sum(-1, keepdim=True)
         relu_cos = F.relu(true_cos)

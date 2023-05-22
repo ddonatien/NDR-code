@@ -41,7 +41,7 @@ class Runner:
         self.use_deform = self.conf.get_bool('train.use_deform')
         self.use_clifford = self.conf.get_bool('train.use_clifford')
         if self.use_deform:
-            self.deform_dim = self.conf.get_int('model.deform_network.d_feature')
+            self.deform_dim = self.conf.get_int('model.deform_field.d_fcode')
             self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
             self.appearance_codes = torch.randn(self.dataset.n_images, self.appearance_dim, requires_grad=True).to(self.device)
@@ -89,6 +89,7 @@ class Runner:
 
         # Deform
         if self.use_deform:
+            self.deform_field = DeformField(**self.conf['model.deform_field']).to(self.device)
             self.deform_network = DeformNetwork(**self.conf['model.deform_network']).to(self.device)
             self.topo_network = TopoNetwork(**self.conf['model.topo_network']).to(self.device)
         elif self.use_clifford:
@@ -108,6 +109,7 @@ class Runner:
         # Deform
         if self.use_deform:
             self.renderer = DeformNeuSRenderer(self.report_freq,
+                                     self.deform_field,
                                      self.deform_network,
                                      self.topo_network,
                                      self.sdf_network,
@@ -132,6 +134,13 @@ class Runner:
         # Load Optimizer
         params_to_train = []
         if self.use_deform:
+            params_to_train += [{'name':'deform_field', 'params':self.deform_field.parameters(), 'lr':self.learning_rate}]
+            params_to_train += [{'name':'deform_network', 'params':self.deform_network.parameters(), 'lr':self.learning_rate}]
+            params_to_train += [{'name':'topo_network', 'params':self.topo_network.parameters(), 'lr':self.learning_rate}]
+            params_to_train += [{'name':'deform_codes', 'params':self.deform_codes, 'lr':self.learning_rate}]
+            params_to_train += [{'name':'appearance_codes', 'params':self.appearance_codes, 'lr':self.learning_rate}]
+        elif self.use_clifford:
+            params_to_train += [{'name':'deform_field', 'params':self.deform_field.parameters(), 'lr':self.learning_rate}]
             params_to_train += [{'name':'deform_network', 'params':self.deform_network.parameters(), 'lr':self.learning_rate}]
             params_to_train += [{'name':'topo_network', 'params':self.topo_network.parameters(), 'lr':self.learning_rate}]
             params_to_train += [{'name':'deform_codes', 'params':self.deform_codes, 'lr':self.learning_rate}]
@@ -146,7 +155,7 @@ class Runner:
                    group='NDRCL_train')
 
         wandb.watch((
-            # self.deform_field,
+            self.deform_field,
             self.deform_network,
             self.topo_network,
             self.sdf_network,

@@ -350,7 +350,7 @@ class DeformNetwork(nn.Module):
 
             lin = getattr(self, "lin"+str(i_b)+"_c")
             deform_code_ib = lin(deformation_code) + deformation_code
-            deform_code_ib = deform_code_ib.repeat(batch_size, 1)
+            # deform_code_ib = deform_code_ib.repeat(batch_size, 1)
             # part a
             if form == 0:
                 # zyx
@@ -436,7 +436,7 @@ class DeformNetwork(nn.Module):
 
             lin = getattr(self, "lin"+str(i_b)+"_c")
             deform_code_ib = lin(deformation_code) + deformation_code
-            deform_code_ib = deform_code_ib.repeat(batch_size, 1)
+            # deform_code_ib = deform_code_ib.repeat(batch_size, 1)
             # part b
             if form == 0:
                 # axis: z -> y -> x
