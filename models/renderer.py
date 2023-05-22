@@ -548,13 +548,15 @@ class DeformNeuSRenderer:
 
     
     def extract_observation_geometry(self, deform_code, bound_min, bound_max, resolution, threshold=0.0, alpha_ratio=0.0):
+        def query_func(pts):
+            pts, pts_c = self.deform_field(pts, deform_code)
+            return -self.sdf_network.sdf(self.deform_network(pts_c, pts, alpha_ratio),
+                                        self.ambient_network(deform_code, pts, alpha_ratio), alpha_ratio)
         return extract_geometry(bound_min,
                                 bound_max,
                                 resolution=resolution,
                                 threshold=threshold,
-                                query_func=lambda pts: -self.sdf_network.sdf(self.deform_network(deform_code, pts,
-                                                            alpha_ratio), self.ambient_network(deform_code, pts,
-                                                            alpha_ratio), alpha_ratio))
+                                query_func=query_func(pts))
 
 
 class NeuSRenderer:
