@@ -1,5 +1,7 @@
+import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from models.embedder import get_embedder
 from typing import Tuple, Union
@@ -180,10 +182,13 @@ class DeformField(nn.Module):
         super().__init__()
         self.mlp = MLP(3+d_fcode, d_feature, d_hidden, zero_init=True)
 
-    def forward(self, x, fcode):
+    def forward(self, x, fcode, gcodes):
         w = fcode.repeat(x.shape[0], 1)
-        feats = self.mlp(torch.cat((x, w), dim=-1))
-        return x, feats
+        query = self.mlp(torch.cat((x, w), dim=-1))
+        d_k = query.shape[-1]
+        print(gcodes.shape, query.shape)
+        attn = F.softmax(torch.matmul(query, gcodes) / math.sqrt(d_k), dim=-1)
+        return x, torch.matmul(attn, gcodes)
 
 
 # Deform

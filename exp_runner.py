@@ -43,11 +43,13 @@ class Runner:
         self.use_clifford = self.conf.get_bool('train.use_clifford')
         if self.use_deform:
             self.deform_dim = self.conf.get_int('model.deform_field.d_fcode')
+            self.n_gcodes = self.conf.get_init('model.deform_field.n_gcodes')
+            self.group_fsz = self.conf.get_init('model.deform_field.d_feature')
+            self.group_codes = torch.randn(self.n_gcodes, self.group_fsz, requires_grad=True).to(self.device)
             self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
             self.appearance_codes = torch.randn(self.dataset.n_images, self.appearance_dim, requires_grad=True).to(self.device)
         if self.use_clifford:
-            print("Prout")
             # from models.clifford_fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork,\
             #                                    DeformNetwork, AppearanceNetwork, TopoNetwork, DeformField
             self.deform_dim = self.conf.get_int('model.deform_field.d_fcode')
@@ -139,6 +141,7 @@ class Runner:
             params_to_train += [{'name':'deform_network', 'params':self.deform_network.parameters(), 'lr':self.learning_rate}]
             params_to_train += [{'name':'topo_network', 'params':self.topo_network.parameters(), 'lr':self.learning_rate}]
             params_to_train += [{'name':'deform_codes', 'params':self.deform_codes, 'lr':self.learning_rate}]
+            params_to_train += [{'name':'group_codes', 'params':self.group_codes, 'lr':self.learning_rate}]
             params_to_train += [{'name':'appearance_codes', 'params':self.appearance_codes, 'lr':self.learning_rate}]
         elif self.use_clifford:
             params_to_train += [{'name':'deform_field', 'params':self.deform_field.parameters(), 'lr':self.learning_rate}]
@@ -236,13 +239,13 @@ class Runner:
                     mask = torch.ones_like(mask)
                 mask_sum = mask.sum() + 1e-5
                 
-                render_out = self.renderer.render(deform_code, appearance_code, rays_o, rays_d, near, far,
-                                                  cos_anneal_ratio=self.get_cos_anneal_ratio(),
+                render_out = self.renderer.render(self.group_codes, deform_code, appearance_code, rays_o, rays_d,
+                                                  near, far, cos_anneal_ratio=self.get_cos_anneal_ratio(),
                                                   alpha_ratio=alpha_ratio, iter_step=self.iter_step)
                 # Depth
                 if self.use_depth:
                     sdf_loss, angle_loss, valid_depth_region =\
-                        self.renderer.errorondepth(deform_code, rays_o, rays_d, rays_s, mask,
+                        self.renderer.errorondepth(self.group_codes, deform_code, rays_o, rays_d, rays_s, mask,
                                             alpha_ratio, iter_step=self.iter_step)
                 color_fine = render_out['color_fine']
                 s_val = render_out['s_val']
@@ -476,6 +479,7 @@ class Runner:
             self.deform_network.load_state_dict(checkpoint['deform_network'])
             self.topo_network.load_state_dict(checkpoint['topo_network'])
             self.deform_codes = torch.from_numpy(checkpoint['deform_codes']).to(self.device).requires_grad_()
+            self.group_codes = torch.from_numpy(checkpoint['group_codes']).to(self.device).requires_grad_()
             self.appearance_codes = torch.from_numpy(checkpoint['appearance_codes']).to(self.device).requires_grad_()
             logging.info('Use_deform True')
         self.dataset.intrinsics_paras = torch.from_numpy(checkpoint['intrinsics_paras']).to(self.device)
@@ -515,6 +519,7 @@ class Runner:
                 'optimizer': self.optimizer.state_dict(),
                 'iter_step': self.iter_step,
                 'deform_codes': self.deform_codes.data.cpu().numpy(),
+                'group_codes': self.group_codes.data.cpu().numpy(),
                 'appearance_codes': self.appearance_codes.data.cpu().numpy(),
                 'intrinsics_paras': self.dataset.intrinsics_paras.data.cpu().numpy(),
                 'poses_paras': self.dataset.poses_paras.data.cpu().numpy(),
@@ -563,7 +568,8 @@ class Runner:
         for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
             near, far = self.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
             if self.use_deform or self.use_clifford:
-                render_out = self.renderer.render(deform_code,
+                render_out = self.renderer.render(self.group_codes,
+                                                deform_code,
                                                 appearance_code,
                                                 rays_o_batch,
                                                 rays_d_batch,
@@ -678,7 +684,8 @@ class Runner:
         out_normal_fine = []
 
         for rays_o_batch, rays_d_batch, rays_s_batch in zip(rays_o, rays_d, rays_s):
-            color_batch, gradients_batch = self.renderer.renderondepth(deform_code,
+            color_batch, gradients_batch = self.renderer.renderondepth(self.group_codes,
+                                                    deform_code,
                                                     appearance_code,
                                                     rays_o_batch,
                                                     rays_d_batch,
@@ -778,8 +785,8 @@ class Runner:
         bound_max = torch.tensor(self.dataset.object_bbox_max, dtype=self.dtype)
         
         vertices, triangles =\
-            self.renderer.extract_observation_geometry(deform_code, bound_min, bound_max, resolution=resolution, threshold=threshold,
-                                                        alpha_ratio=max(min(self.iter_step/self.max_pe_iter, 1.), 0.))
+            self.renderer.extract_observation_geometry(self.group_codes, deform_code, bound_min, bound_max, resolution=resolution,
+                                                       threshold=threshold, alpha_ratio=max(min(self.iter_step/self.max_pe_iter, 1.), 0.))
         os.makedirs(os.path.join(self.base_exp_dir, filename), exist_ok=True)
 
         if world_space:
