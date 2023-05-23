@@ -368,7 +368,8 @@ class DeformNeuSRenderer:
                                                 sdf,
                                                 self.n_importance // self.up_sample_steps,
                                                 64 * 2**i)
-                    z_vals, sdf = self.cat_z_vals(deform_code,
+                    z_vals, sdf = self.cat_z_vals(group_codes,
+                                                  deform_code,
                                                   rays_o,
                                                   rays_d,
                                                   z_vals,
