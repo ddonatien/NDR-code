@@ -43,8 +43,8 @@ class Runner:
         self.use_clifford = self.conf.get_bool('train.use_clifford')
         if self.use_deform:
             self.deform_dim = self.conf.get_int('model.deform_field.d_fcode')
-            self.n_gcodes = self.conf.get_init('model.deform_field.n_gcodes')
-            self.group_fsz = self.conf.get_init('model.deform_field.d_feature')
+            self.n_gcodes = self.conf.get_int('model.deform_field.n_gcodes')
+            self.group_fsz = self.conf.get_int('model.deform_field.d_feature')
             self.group_codes = torch.randn(self.n_gcodes, self.group_fsz, requires_grad=True).to(self.device)
             self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
