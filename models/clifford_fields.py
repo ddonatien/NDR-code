@@ -177,6 +177,7 @@ class DeformField(nn.Module):
     def __init__(self,
                  d_fcode,
                  d_feature,
+                 n_gcodes,
                  d_hidden=[512, 512],
                  ):
         super().__init__()
