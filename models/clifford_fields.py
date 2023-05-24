@@ -188,7 +188,7 @@ class DeformField(nn.Module):
         query = self.mlp(torch.cat((x, w), dim=-1))
         d_k = query.shape[-1]
         attn = F.softmax(torch.matmul(query, gcodes.transpose(-1, -2)) / math.sqrt(d_k), dim=-1)
-        return x, torch.matmul(attn, gcodes)
+        return x, torch.matmul(attn, gcodes), attn
 
 
 # Deform
