@@ -172,7 +172,7 @@ class DeformNeuSRenderer:
             pts = rays_o[:, None, :] + rays_d[:, None, :] * new_z_vals[..., :, None]
             pts = pts.reshape(-1, 3)
             # Deform
-            pts, pts_c = self.deform_field(pts, deform_code, group_codes)
+            pts, pts_c, _ = self.deform_field(pts, deform_code, group_codes)
             pts_canonical = self.deform_network(pts_c, pts, alpha_ratio)
             ambient_coord = self.ambient_network(deform_code, pts, alpha_ratio)
             new_sdf = self.sdf_network.sdf(pts_canonical, ambient_coord, alpha_ratio).reshape(batch_size, n_importance)
