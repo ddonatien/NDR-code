@@ -312,8 +312,10 @@ class DeformNeuSRenderer:
         weights_sum = weights.sum(dim=-1, keepdim=True)
 
         # depth map
-        palette = PALETTE.to(weights.device)
         depth_map = torch.sum(weights * mid_z_vals, -1, keepdim=True)
+
+        palette = PALETTE.to(weights.device)
+        print(attn.shape, palette.shape)
         sampled_attn = torch.matmul(attn, palette)
         sampled_attn = sampled_attn.reshape(*(sampled_color.shape))
         color = (sampled_color * weights[:, :, None]).sum(dim=1)
