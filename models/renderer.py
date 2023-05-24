@@ -316,7 +316,6 @@ class DeformNeuSRenderer:
 
         palette = PALETTE.to(weights.device)
         palette = palette[:attn.shape[-1], :]
-        print(attn.shape, palette.shape)
         sampled_attn = torch.matmul(attn, palette)
         sampled_attn = sampled_attn.reshape(*(sampled_color.shape))
         color = (sampled_color * weights[:, :, None]).sum(dim=1)
