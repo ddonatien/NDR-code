@@ -563,6 +563,7 @@ class Runner:
 
         out_rgb_fine = []
         out_normal_fine = []
+        out_attn_fine = []
         out_depth_fine = []
 
         for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
