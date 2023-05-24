@@ -590,6 +590,8 @@ class Runner:
 
             if feasible('color_fine'):
                 out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
+            if feasible('attn_fine'):
+                out_attn_fine.append(render_out['attn_fine'].detach().cpu().numpy())
             if feasible('gradients') and feasible('weights'):
                 if self.iter_step >= self.important_begin_iter:
                     n_samples = self.renderer.n_samples + self.renderer.n_importance
@@ -608,6 +610,8 @@ class Runner:
         img_fine = None
         if len(out_rgb_fine) > 0:
             img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3, -1]) * 256).clip(0, 255)
+        if len(out_attn_fine) > 0:
+            attn_fine = (np.concatenate(out_attn_fine, axis=0).reshape([H, W, 3, -1]) * 256).clip(0, 255)
 
         normal_img = None
         if len(out_normal_fine) > 0:
@@ -630,6 +634,7 @@ class Runner:
         os.makedirs(os.path.join(self.base_exp_dir, rgb_filename), exist_ok=True)
         os.makedirs(os.path.join(self.base_exp_dir, normal_filename), exist_ok=True)
         os.makedirs(os.path.join(self.base_exp_dir, depth_filename), exist_ok=True)
+        os.makedirs(os.path.join(self.base_exp_dir, 'attn_map'), exist_ok=True)
 
         for i in range(img_fine.shape[-1]):
             if len(out_rgb_fine) > 0:
@@ -637,6 +642,12 @@ class Runner:
                                         rgb_filename,
                                         '{:0>8d}_{}.png'.format(self.iter_step, idx)),
                            np.concatenate([img_fine[..., i],
+                                           self.dataset.image_at(idx, resolution_level=resolution_level)]))
+            if len(out_attn_fine) > 0:
+                cv.imwrite(os.path.join(self.base_exp_dir,
+                                        'attn_map',
+                                        '{:0>8d}_{}.png'.format(self.iter_step, idx)),
+                           np.concatenate([attn_fine[..., i],
                                            self.dataset.image_at(idx, resolution_level=resolution_level)]))
             if len(out_normal_fine) > 0:
                 cv.imwrite(os.path.join(self.base_exp_dir,
