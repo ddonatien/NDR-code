@@ -239,8 +239,9 @@ class DeformNetwork(nn.Module):
 
     def forward(self, input_codes, input_pts, alpha_ratio):
         batch_size = input_pts.shape[0]
+        x = input_pts
         for i_b in range(self.n_blocks):
-            x = input_pts @ self.e2cl + self.vp
+            x = x @ self.e2cl + self.vp
 
             mot = getattr(self, "mot"+str(i_b))
             x = mot(x, input_codes)
