@@ -50,9 +50,11 @@ class Runner:
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
             self.appearance_codes = torch.randn(self.dataset.n_images, self.appearance_dim, requires_grad=True).to(self.device)
         if self.use_clifford:
-            # from models.clifford_fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork,\
-            #                                    DeformNetwork, AppearanceNetwork, TopoNetwork, DeformField
+            from models.clifford_fields import DeformNetwork
             self.deform_dim = self.conf.get_int('model.deform_field.d_fcode')
+            self.n_gcodes = self.conf.get_int('model.deform_field.n_gcodes')
+            self.group_fsz = self.conf.get_int('model.deform_field.d_feature')
+            self.group_codes = torch.randn(self.n_gcodes, self.group_fsz, requires_grad=True).to(self.device)
             self.deform_codes = torch.randn(self.dataset.n_images, self.deform_dim, requires_grad=True).to(self.device)
             self.appearance_dim = self.conf.get_int('model.appearance_rendering_network.d_global_feature')
             self.appearance_codes = torch.randn(self.dataset.n_images, self.appearance_dim, requires_grad=True).to(self.device)
@@ -120,14 +122,14 @@ class Runner:
                                      self.color_network,
                                      **self.conf['model.neus_renderer'])
         elif self.use_clifford:
-            self.renderer = CliffordNeuSRenderer(self.report_freq,
-                                                 self.deform_field,
-                                                 self.deform_network,
-                                                 self.topo_network,
-                                                 self.sdf_network,
-                                                 self.deviation_network,
-                                                 self.color_network,
-                                                 **self.conf['model.neus_renderer'])
+            self.renderer = DeformNeuSRenderer(self.report_freq,
+                                               self.deform_field,
+                                               self.deform_network,
+                                               self.topo_network,
+                                               self.sdf_network,
+                                               self.deviation_network,
+                                               self.color_network,
+                                               **self.conf['model.neus_renderer'])
         else:
             self.renderer = NeuSRenderer(self.sdf_network,
                                         self.deviation_network,
@@ -148,6 +150,7 @@ class Runner:
             params_to_train += [{'name':'deform_network', 'params':self.deform_network.parameters(), 'lr':self.learning_rate}]
             params_to_train += [{'name':'topo_network', 'params':self.topo_network.parameters(), 'lr':self.learning_rate}]
             params_to_train += [{'name':'deform_codes', 'params':self.deform_codes, 'lr':self.learning_rate}]
+            params_to_train += [{'name':'group_codes', 'params':self.group_codes, 'lr':self.learning_rate}]
             params_to_train += [{'name':'appearance_codes', 'params':self.appearance_codes, 'lr':self.learning_rate}]
         params_to_train += [{'name':'sdf_network', 'params':self.sdf_network.parameters(), 'lr':self.learning_rate}]
         params_to_train += [{'name':'deviation_network', 'params':self.deviation_network.parameters(), 'lr':self.learning_rate}]

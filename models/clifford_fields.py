@@ -237,7 +237,7 @@ class DeformNetwork(nn.Module):
         self.activation = nn.Softplus(beta=100)
 
 
-    def forward(self, input_pts, input_codes, alpha_ratio):
+    def forward(self, input_codes, input_pts, alpha_ratio):
         batch_size = input_pts.shape[0]
         for i_b in range(self.n_blocks):
             x = input_pts @ self.e2cl + self.vp
